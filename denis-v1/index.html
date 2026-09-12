@@ -23,12 +23,12 @@
 
         <form id="onboarding-form" class="panel onboarding-panel">
           <label for="music-request">What would you like to create?</label>
-          <textarea id="music-request" required rows="4" placeholder="Energetic rock. I can use my head. Let nods make drums and let the AI play flute."></textarea>
+          <textarea id="music-request" required rows="4" placeholder="Energetic rock. I can use my head. Let nods make drums and let the AI play flute.">A new composition</textarea>
           <div class="profile-grid">
-            <label>Favourite artists <input id="artists" placeholder="Optional" /></label>
-            <label>Music experience <input id="experience" placeholder="Optional" /></label>
+            <label>Favourite artists <input id="artists" value="Mozart" placeholder="Optional" /></label>
+            <label>Music experience <input id="experience" value="No experience" placeholder="Optional" /></label>
             <label>Comfortable movement <input id="movement" value="Head movements" /></label>
-            <label>Mood <input id="mood" placeholder="e.g. dynamic, calm" /></label>
+            <label>Mood <input id="mood" value="Calm" placeholder="e.g. dynamic, calm" /></label>
           </div>
           <div class="form-actions">
             <button id="voice-button" type="button" class="button secondary">Use voice</button>
@@ -54,10 +54,9 @@
       <section id="calibration-screen" class="screen calibration-screen hidden">
         <p class="eyebrow">CALIBRATION</p>
         <h1>Find your neutral pose.</h1>
-        <p id="calibration-copy">Sit or stand comfortably. When you are ready, hold still for three seconds.</p>
+        <p id="calibration-copy">Sit or stand comfortably. We will first learn your neutral pose, then your comfortable gesture range.</p>
         <div class="camera-frame"><video id="camera" playsinline muted></video><canvas id="landmarks"></canvas></div>
-        <button id="capture-neutral-button" class="button">Capture neutral pose</button>
-        <button id="keyboard-demo-button" class="button secondary">Start keyboard demo instead</button>
+        <button id="capture-neutral-button" class="button">Start calibration</button>
         <p id="calibration-status" class="hint" aria-live="polite">Camera permission is needed to calibrate.</p>
       </section>
 
@@ -70,11 +69,24 @@
           <div class="camera-frame"><video id="play-camera" playsinline muted></video><canvas id="play-landmarks"></canvas><p id="camera-overlay">Tracking your head</p></div>
           <aside class="panel controls">
             <h2>Your movements</h2>
-            <p><kbd>↓</kbd> Nod <span>Kick</span></p>
-            <p><kbd>←</kbd> Tilt left <span>Snare</span></p>
-            <p><kbd>→</kbd> Tilt right <span>Crash</span></p>
+            <p>Head nod <span>Kick</span></p>
+            <p>Tilt left <span id="left-tilt-sound">Snare</span></p>
+            <p>Tilt right <span id="right-tilt-sound">Crash</span></p>
+            <p id="gesture-status" class="hint">Calibrated movement tracking</p>
             <label for="sensitivity">Sensitivity <output id="sensitivity-value">Medium</output></label>
             <input id="sensitivity" type="range" min="1" max="3" value="2" />
+            <details class="debug-panel">
+              <summary>Gesture debug</summary>
+              <label for="debug-nod">Nod threshold <output id="debug-nod-value"></output></label>
+              <input id="debug-nod" type="range" min="0.025" max="0.12" step="0.005" />
+              <label for="debug-left">Left tilt threshold <output id="debug-left-value"></output></label>
+              <input id="debug-left" type="range" min="6" max="25" step="0.5" />
+              <label for="debug-right">Right tilt threshold <output id="debug-right-value"></output></label>
+              <input id="debug-right" type="range" min="6" max="25" step="0.5" />
+              <p id="debug-motion" class="hint">Motion: waiting for tracking</p>
+              <button id="reset-thresholds-button" type="button" class="text-button">Reset to calibration</button>
+            </details>
+            <button id="swap-tilt-button" class="button secondary">Swap tilt sounds</button>
             <button id="midi-button" class="button secondary">Connect MIDI / Chordcat</button>
             <p id="midi-status" class="hint">No MIDI device connected</p>
           </aside>

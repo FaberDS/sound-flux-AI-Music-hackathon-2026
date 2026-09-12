@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { detectGesture, poseFromLandmarks } from "./motion.js";
+import { calibrationFromRange, poseFromLandmarks, updateGesture } from "./motion.js";
 
 const points = [];
 points[33] = { x: .4, y: .4 };
@@ -7,7 +7,14 @@ points[263] = { x: .6, y: .4 };
 points[1] = { x: .5, y: .55 };
 const pose = poseFromLandmarks(points);
 assert.equal(Math.round(pose.tilt), 0);
-assert.equal(detectGesture({ nod: .9, tilt: 0 }, { nod: .7, tilt: 0 }, { nod: .1, tilt: 15 }, null), "kick");
-assert.equal(detectGesture({ nod: .7, tilt: -20 }, { nod: .7, tilt: 0 }, { nod: .1, tilt: 15 }, null), "snare");
-assert.equal(detectGesture({ nod: .7, tilt: 20 }, { nod: .7, tilt: 0 }, { nod: .1, tilt: 15 }, null), "crash");
+const calibrated = calibrationFromRange({ nod: .2, left: 30, right: 18 });
+assert.ok(Math.abs(calibrated.nod - .09) < 1e-9);
+assert.equal(calibrated.left, 13.5);
+assert.equal(calibrated.right, 8.1);
+const threshold = { nod: .1, left: 15, right: 15 };
+const first = updateGesture({ nod: .82, tilt: 0 }, { nod: .7, tilt: 0 }, threshold);
+assert.equal(first.gesture, "kick");
+assert.equal(updateGesture({ nod: .83, tilt: 0 }, { nod: .7, tilt: 0 }, threshold, first.active).gesture, null);
+assert.equal(updateGesture({ nod: .7, tilt: -20 }, { nod: .7, tilt: 0 }, threshold).gesture, "snare");
+assert.equal(updateGesture({ nod: .7, tilt: 20 }, { nod: .7, tilt: 0 }, threshold).gesture, "crash");
 console.log("motion checks passed");

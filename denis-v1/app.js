@@ -1,10 +1,10 @@
-import { clamp, detectGesture, poseFromLandmarks } from "./motion.js";
+import { calibrationFromRange, clamp, poseFromLandmarks, updateGesture } from "./motion.js";
 
 const $ = (id) => document.getElementById(id);
 const screens = [$("setup-screen"), $("calibration-screen"), $("play-screen")];
 const state = {
-  preset: null, stream: null, tracker: null, baseline: null, previousGesture: null,
-  lastPose: null, lastGestureAt: 0, audio: null, playing: false, timer: null,
+  preset: null, stream: null, tracker: null, baseline: null, threshold: null, calibratedThreshold: null, activeGesture: null, tiltSwapped: false,
+  lastPose: null, smoothedPose: null, lastGestureAt: 0, lastVideoTime: -1, audio: null, playing: false, timer: null,
   nextFluteAt: 0, fluteStep: 0, midi: null, midiOutput: null,
 };
 
@@ -18,12 +18,20 @@ function setConnection(message, kind = "") {
   status.className = `status ${kind}`;
 }
 
+function updateThresholdControls() {
+  if (!state.threshold) return;
+  ["nod", "left", "right"].forEach((key) => {
+    $("debug-" + key).value = state.threshold[key];
+    $("debug-" + key + "-value").textContent = state.threshold[key].toFixed(key === "nod" ? 3 : 1);
+  });
+}
+
 function cameraErrorMessage(error) {
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return "Camera needs https or http://localhost:8000 — browser file previews cannot access it.";
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") return "Camera permission was blocked. Allow camera access for localhost, then press Calibrate & play again.";
-  if (error?.name === "NotFoundError") return "No camera was found. Connect one or use the keyboard demo.";
+  if (error?.name === "NotFoundError") return "No camera was found. Connect a camera, then try again.";
   if (error?.name === "NotReadableError") return "Your camera is busy in another app. Close it there, then try again.";
-  return "Camera could not start. Use the keyboard demo or check browser camera permissions.";
+  return "Camera could not start. Check browser camera permissions and try again.";
 }
 
 function buildPreset(request) {
@@ -68,35 +76,62 @@ async function loadTracker() {
     });
     trackFrame();
   } catch (error) {
-    $("calibration-status").textContent = "Face tracking could not load. You can still test with arrow keys.";
-    $("camera-overlay").textContent = "Keyboard controls active";
+    $("calibration-status").textContent = "Face tracking could not load. Check the network connection and retry calibration.";
+    $("camera-overlay").textContent = "Head tracking unavailable";
   }
 }
 
 function trackFrame() {
   if (!state.tracker || !state.stream) return;
-  const video = $("camera");
-  if (video.readyState >= 2) {
+  const video = state.playing ? $("play-camera") : $("camera");
+  if (video.readyState >= 2 && video.currentTime !== state.lastVideoTime) {
+    state.lastVideoTime = video.currentTime;
     const result = state.tracker.detectForVideo(video, performance.now());
     const pose = result.faceLandmarks?.[0] && poseFromLandmarks(result.faceLandmarks[0]);
-    if (pose) onPose(pose);
+    if (pose) { drawLandmarks(pose.points); onPose(pose); }
+    else if (state.playing) $("camera-overlay").textContent = "Face not detected — move into view";
   }
   requestAnimationFrame(trackFrame);
 }
 
+function drawLandmarks(points) {
+  [$("landmarks"), $("play-landmarks")].forEach((canvas) => {
+    const video = canvas.id === "landmarks" ? $("camera") : $("play-camera");
+    if (!video.videoWidth) return;
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#c9ff37";
+    points.forEach(({ x, y }) => { context.beginPath(); context.arc(x * canvas.width, y * canvas.height, 7, 0, Math.PI * 2); context.fill(); });
+  });
+}
+
 function onPose(pose) {
+  pose = state.smoothedPose
+    ? { ...pose, nod: state.smoothedPose.nod * .75 + pose.nod * .25, tilt: state.smoothedPose.tilt * .75 + pose.tilt * .25 }
+    : pose;
+  state.smoothedPose = pose;
   state.lastPose = pose;
   $("calibration-status").textContent = "Face detected. Keep a comfortable neutral pose.";
   if (!state.playing || !state.baseline) return;
-  const level = Number($("sensitivity").value);
-  const threshold = { nod: [0.11, 0.08, 0.055][level - 1], tilt: [22, 16, 11][level - 1] };
-  const gesture = detectGesture(pose, state.baseline, threshold, state.previousGesture);
+  const multiplier = [1.3, 1, .7][Number($("sensitivity").value) - 1];
+  const threshold = Object.fromEntries(Object.entries(state.threshold).map(([key, value]) => [key, value * multiplier]));
+  const result = updateGesture(pose, state.baseline, threshold, state.activeGesture);
+  state.activeGesture = result.active;
+  $("debug-motion").textContent = `Motion: nod ${result.nod.toFixed(3)} · tilt ${result.tilt.toFixed(1)}°`;
   const now = performance.now();
-  if (gesture && now - state.lastGestureAt > 150) {
-    trigger(gesture, clamp(Math.abs(pose.tilt - state.baseline.tilt) / 30, 0.45, 1));
+  if (result.gesture && now - state.lastGestureAt > 180) {
+    const sound = state.tiltSwapped && result.gesture !== "kick"
+      ? (result.gesture === "snare" ? "crash" : "snare") : result.gesture;
+    const amount = result.gesture === "kick" ? result.nod / threshold.nod : Math.abs(result.tilt) / (result.gesture === "snare" ? threshold.left : threshold.right);
+    trigger(sound, clamp(.45 + amount * .18, .45, 1));
     state.lastGestureAt = now;
+    $("gesture-status").textContent = `${sound[0].toUpperCase()}${sound.slice(1)} detected`;
+    $("camera-overlay").textContent = `${sound} detected`;
+  } else if (!result.active) {
+    $("gesture-status").textContent = "Ready for your next movement";
+    $("camera-overlay").textContent = "Tracking your head";
   }
-  state.previousGesture = gesture;
 }
 
 function getAudio() {
@@ -175,7 +210,7 @@ function scheduleFlute() {
 
 function startPlaying() {
   getAudio();
-  state.playing = true; state.fluteStep = 0; state.nextFluteAt = state.audio.currentTime + 0.08;
+  state.playing = true; state.activeGesture = null; state.smoothedPose = null; state.fluteStep = 0; state.nextFluteAt = state.audio.currentTime + 0.08;
   state.timer = setInterval(scheduleFlute, 50);
   show($("play-screen"));
 }
@@ -205,36 +240,63 @@ $("calibrate-button").addEventListener("click", async () => {
     const message = cameraErrorMessage(error);
     setConnection("Camera unavailable", "error");
     $("calibration-status").textContent = message;
-    $("camera-overlay").textContent = "Keyboard controls active";
+    $("camera-overlay").textContent = "Head tracking unavailable";
   }
 });
 $("capture-neutral-button").addEventListener("click", () => {
   if (!state.lastPose) { $("calibration-status").textContent = "Keep your face in view, then try again."; return; }
   $("capture-neutral-button").disabled = true;
-  $("calibration-status").textContent = "Holding neutral pose…";
+  $("calibration-copy").textContent = "Step 1 of 2: hold your comfortable neutral pose for three seconds.";
+  $("calibration-status").textContent = "Learning your neutral pose…";
   const readings = [];
+  state.smoothedPose = null;
   const sampler = setInterval(() => state.lastPose && readings.push(state.lastPose), 60);
   setTimeout(() => {
-    clearInterval(sampler); $("capture-neutral-button").disabled = false;
-    if (readings.length < 10) { $("calibration-status").textContent = "Calibration needs a clearer camera view."; return; }
+    clearInterval(sampler);
+    if (readings.length < 10) { $("capture-neutral-button").disabled = false; $("calibration-status").textContent = "Calibration needs a clearer camera view. Try again."; return; }
     state.baseline = { nod: readings.reduce((sum, item) => sum + item.nod, 0) / readings.length, tilt: readings.reduce((sum, item) => sum + item.tilt, 0) / readings.length };
-    startPlaying();
+    captureGestureRange();
   }, 3000);
 });
-$("keyboard-demo-button").addEventListener("click", () => {
-  getAudio();
-  state.baseline = { nod: 0, tilt: 0 };
-  $("camera-overlay").textContent = "Keyboard controls active";
-  startPlaying();
-});
+
+function captureGestureRange() {
+  $("calibration-copy").textContent = "Step 2 of 2: gently nod once, tilt left once, then tilt right once. Stay comfortable.";
+  $("calibration-status").textContent = "Learning your movement range…";
+  const range = { nod: 0, left: 0, right: 0 };
+  const sampler = setInterval(() => {
+    if (!state.lastPose) return;
+    range.nod = Math.max(range.nod, state.lastPose.nod - state.baseline.nod);
+    range.left = Math.max(range.left, state.baseline.tilt - state.lastPose.tilt);
+    range.right = Math.max(range.right, state.lastPose.tilt - state.baseline.tilt);
+  }, 40);
+  setTimeout(() => {
+    clearInterval(sampler); $("capture-neutral-button").disabled = false;
+    state.calibratedThreshold = calibrationFromRange(range);
+    state.threshold = { ...state.calibratedThreshold };
+    updateThresholdControls();
+    $("calibration-status").textContent = "Calibration complete. Your movements are ready.";
+    startPlaying();
+  }, 5000);
+}
 $("sensitivity").addEventListener("input", (event) => { $("sensitivity-value").textContent = ["Low", "Medium", "High"][event.target.value - 1]; });
+["nod", "left", "right"].forEach((key) => $("debug-" + key).addEventListener("input", (event) => {
+  state.threshold[key] = Number(event.target.value);
+  updateThresholdControls();
+}));
+$("reset-thresholds-button").addEventListener("click", () => {
+  if (!state.calibratedThreshold) return;
+  state.threshold = { ...state.calibratedThreshold };
+  updateThresholdControls();
+  $("gesture-status").textContent = "Thresholds reset to calibration";
+});
+$("swap-tilt-button").addEventListener("click", () => {
+  state.tiltSwapped = !state.tiltSwapped;
+  $("left-tilt-sound").textContent = state.tiltSwapped ? "Crash" : "Snare";
+  $("right-tilt-sound").textContent = state.tiltSwapped ? "Snare" : "Crash";
+  $("gesture-status").textContent = "Tilt sounds swapped";
+});
 $("midi-button").addEventListener("click", () => connectMidi().catch(() => { $("midi-status").textContent = "MIDI access was not granted."; }));
 $("stop-button").addEventListener("click", stopPlaying);
-document.addEventListener("keydown", (event) => {
-  if (!state.playing || event.repeat) return;
-  const kind = { ArrowDown: "kick", ArrowLeft: "snare", ArrowRight: "crash" }[event.key];
-  if (kind) { event.preventDefault(); trigger(kind); }
-});
 
 $("voice-button").addEventListener("click", () => {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
