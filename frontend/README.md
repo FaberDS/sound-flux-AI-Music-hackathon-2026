@@ -35,7 +35,7 @@ Die Sprachmodelle, Ollama und FFmpeg müssen wie in [local-speech/README.md](../
 - „Mit Sound Flux sprechen“ öffnet das Mikrofon. „Aufnahme senden“ lädt die Aufnahme hoch und startet die Antwort. Aufnahmen enden nach spätestens 60 Sekunden.
 - Alternativ eine Nachricht schreiben. Die Antwort erscheint während des Streamings. „Antworten vorlesen“ steuert die anschließende Sprachausgabe.
 - Während Musik oder Sprachbegleitung aktiv sind, ist ein fester Stopp-Knopf sichtbar. Er stoppt Aufnahme und Ton sofort und unterbricht die laufende Serveranfrage.
-- „Für Begleitpersonen“ erlaubt freiwillige Angaben zu Name und Musikvorlieben. Dort lässt sich die Sitzung mit Gespräch und Angaben zurücksetzen.
+- „Für Begleitpersonen“ erlaubt freiwillige Angaben zu Name und Musikvorlieben. Dort lässt sich die Frontend-Ansicht mit Gespräch und Angaben zurücksetzen. Die im Backend gespeicherten Daten bleiben erhalten.
 
 Mikrofonzugriff braucht localhost oder HTTPS. Beim Öffnen über eine gewöhnliche HTTP-Adresse im WLAN ist häufig nur die Texteingabe verfügbar. Der Browser fragt erst nach Mikrofonzugriff, wenn die Person auf den Sprechen-Knopf tippt.
 
@@ -55,7 +55,7 @@ Die drei Gesprächsschritte verwenden dieselbe `turn_id`. Für jede neue Nachric
 
 Das Frontend verwendet die Standardmodelle und Standardstimme der API. Es generiert Musik lokal über Web Audio; die Sprach-API liefert Text und Sprache, keine Musikdateien. Audioqualität und Sprachunterstützung hängen von den Backend-Modellen ab.
 
-Profil und Gespräch bleiben im React-Arbeitsspeicher. Das Frontend verwendet dafür weder Local Storage noch Session Storage. Die API erhält Text, Profil und hochgeladene Aufnahmen zur Verarbeitung. „Sitzung beenden“ löscht die Daten im Frontend; nach einem Neuladen sind sie ebenfalls weg.
+Die Frontend-Ansicht hält Profil und Gespräch im React-Arbeitsspeicher und verwendet dafür weder Local Storage noch Session Storage. Die API erhält Text, Profil und hochgeladene Aufnahmen zur Verarbeitung. Das Backend speichert Gespräche und daraus erkannte Profilangaben dauerhaft in `local-speech/api/sound_flux.db`, sofern `PROFILE_DB` keinen anderen Pfad vorgibt. „Sitzung beenden und Ansicht leeren“ sowie ein Neuladen entfernen nur die Daten im Frontend. Die gespeicherten Backend-Daten bleiben erhalten und können spätere Antworten beeinflussen.
 
 ## Build und Prüfung
 

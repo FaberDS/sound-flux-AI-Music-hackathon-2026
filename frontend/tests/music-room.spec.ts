@@ -84,7 +84,7 @@ test('sends the profile and conversation history, then clears session data', asy
   expect(requests[1].turn_id).not.toBe(requests[0].turn_id)
   await page.getByRole('button', { name: 'Für Begleitpersonen' }).click()
   await page
-    .getByRole('button', { name: 'Sitzung beenden und Angaben löschen' })
+    .getByRole('button', { name: 'Sitzung beenden und Ansicht leeren' })
     .click()
   await expect(page.locator('summary')).toHaveCount(0)
   await page.getByRole('button', { name: 'Für Begleitpersonen' }).click()

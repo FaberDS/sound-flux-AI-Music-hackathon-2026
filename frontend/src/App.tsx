@@ -562,7 +562,7 @@ export default function App() {
             )}
             <p className="companion-footnote">
               <ShieldCheck size={13} />
-              Dein Gespräch bleibt in dieser Sitzung.
+              Gespräche werden lokal auf diesem Mac gespeichert.
             </p>
           </section>
         </section>
@@ -762,9 +762,10 @@ export default function App() {
           </label>
           <p className="dialog-note">
             <ShieldCheck size={19} />
-            Die Angaben werden mit Nachrichten an die lokale Sprach-API
-            gesendet. Das Frontend speichert sie nur im Arbeitsspeicher. Nach
-            dem Neuladen sind sie weg.
+            Die lokale Sprach-API speichert Gespräche und daraus erkannte
+            Profilangaben auf diesem Mac. Wenn du die Sitzung beendest,
+            werden die Angaben und das Gespräch nur aus dieser Ansicht
+            entfernt.
           </p>
           <p className="text-sm leading-relaxed text-muted">
             Die Instrumente und Melodien entstehen direkt im Browser. Die
@@ -778,7 +779,7 @@ export default function App() {
         </form>
         <button className="reset-session" onClick={resetSession}>
           <RotateCcw size={16} />
-          Sitzung beenden und Angaben löschen
+          Sitzung beenden und Ansicht leeren
         </button>
       </Dialog>
     </div>
