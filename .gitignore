@@ -1,0 +1,5 @@
+# Generated audio-engine cache. This includes local model weights; ignore, never delete.
+audio-engine/.cache/
+audio-engine/__pycache__/
+__pycache__/
+*.py[cod]

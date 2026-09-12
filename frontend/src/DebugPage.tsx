@@ -1,4 +1,4 @@
-˚import { useCallback, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { checkConnection, preseedOnboarding } from './lib/api'
 import { historyTime } from './lib/savedData'
 import { useSavedData } from './hooks/useSavedData'
@@ -15,6 +15,7 @@ export default function DebugPage() {
     0.45,
     refreshSaved,
     saved.profile?.onboarding ?? null,
+    '',
   )
 
   const refresh = useCallback(async () => {

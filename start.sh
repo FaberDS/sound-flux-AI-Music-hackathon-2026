@@ -91,6 +91,11 @@ if curl --fail --silent --max-time 1 http://127.0.0.1:8000/health >/dev/null; th
 else
   start_service "Sprach-API" "local-speech/api" uv run uvicorn app:app --host 127.0.0.1 --port 8000
 fi
+if curl --fail --silent --max-time 1 http://127.0.0.1:7860/api/status >/dev/null; then
+  printf '\n[Audio Engine] Nutze die bereits laufende Engine auf Port 7860\n'
+else
+  start_service "Audio Engine" "audio-engine" uv run --locked python app.py
+fi
 
 # Weitere Services hier ergänzen, zum Beispiel:
 # start_service "Mein Service" "mein-ordner" mein-befehl --mein-argument
@@ -98,6 +103,7 @@ fi
 
 printf '\nFrontend-Adresse: http://localhost:%s\n' "$FRONTEND_PORT"
 printf 'Sprach-API: http://127.0.0.1:8000\n'
+printf 'Audio Engine: http://127.0.0.1:7860\n'
 printf 'Die Vite-Ausgabe bestätigt, sobald der Server bereit ist. Ctrl+C beendet alle gestarteten Services.\n'
 
 # Bash 3.2 hat kein wait -n. Sobald ein Service endet, räumt EXIT auch die übrigen auf.

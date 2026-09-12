@@ -102,6 +102,7 @@ export function useCompanion(
   const stop = useCallback(() => {
     continuousRef.current = false
     setContinuous(false)
+    setPlayMode(false)
     const interrupted = cancel()
     setPhase('idle')
     return interrupted
@@ -189,7 +190,11 @@ export function useCompanion(
         },
         onboardingKey,
         (mode) => {
-          if (mode === 'play') setPlayMode(true)
+          if (mode === 'play') {
+            continuousRef.current = false
+            setContinuous(false)
+            setPlayMode(true)
+          }
         },
         (key) => {
           pendingOnboardingKey.current = key
@@ -437,10 +442,16 @@ export function useCompanion(
 
   async function startGreeting(turn?: Turn) {
     const name = settings.current.name ? `, ${settings.current.name}` : ''
+    continuousRef.current = false
+    setContinuous(false)
+    setPlayMode(true)
     return speakBeforeListening(
-      `Let's do some music${name}. I am glad you are here. Tell me what you would like to make or hear today.`,
+      `Let's do some music${name}. I am glad you are here. Hum a melody for me.`,
       null,
       turn,
+      () => {
+        setPhase('idle')
+      },
     )
   }
 
@@ -448,6 +459,7 @@ export function useCompanion(
     prompt: string,
     onboardingKey: string | null = null,
     existingTurn?: Turn,
+    onSpeechEnd?: () => void,
   ) {
     const turn = existingTurn ?? beginTurn()
     pendingOnboardingKey.current = onboardingKey
@@ -462,8 +474,10 @@ export function useCompanion(
       audio.volume = settings.current.volume
       player.current = audio
       audio.onended = () => {
-        if (continuousRef.current && isCurrent(turn))
-          void startRecording(true, turn)
+        if (!isCurrent(turn)) return
+        if (onSpeechEnd) return onSpeechEnd()
+        if (continuousRef.current) void startRecording(true, turn)
+        else setPhase('idle')
       }
       await audio.play()
       if (isCurrent(turn)) setPhase('speaking')

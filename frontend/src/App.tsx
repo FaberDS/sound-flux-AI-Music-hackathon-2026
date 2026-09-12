@@ -28,7 +28,12 @@ import {
   X,
 } from 'lucide-react'
 import { checkConnection, preseedOnboarding } from './lib/api'
-import { MusicRoom, type Instrument, type Mood } from './lib/music'
+import {
+  MusicRoom,
+  type CapturePhase,
+  type Instrument,
+  type Mood,
+} from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
 import SoundFlux from './components/sound-flux/SoundFlux.jsx'
 import { ProfilePanel } from './components/ProfilePanel'
@@ -170,10 +175,17 @@ function RecordArtwork({ active }: { active: boolean }) {
   )
 }
 
-function AmazingGraceArtwork({ src }: { src: string }) {
+function AmazingGraceArtwork({
+  src,
+  children,
+}: {
+  src: string
+  children?: ReactNode
+}) {
   return (
     <div className="amazing-grace-art" aria-label="Amazing Grace artwork">
       <img src={src} alt="Amazing Grace memory" />
+      {children}
     </div>
   )
 }
@@ -181,6 +193,7 @@ function AmazingGraceArtwork({ src }: { src: string }) {
 export default function App({ debug = false }: { debug?: boolean }) {
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
+  const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
   const [volume, setVolume] = useState(0.45)
   const [readAloud, setReadAloud] = useState(true)
   const [dialog, setDialog] = useState<'help' | 'profile' | null>(null)
@@ -199,6 +212,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [music] = useState(() => new MusicRoom())
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const healthRequest = useRef<AbortController | null>(null)
+  const engineStarted = useRef(false)
   const saved = useSavedData()
   const refreshSaved = saved.refresh
   const companion = useCompanion(
@@ -210,7 +224,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
     saved.profile?.properties.find((property) => property.key === 'name')
       ?.value ?? '',
   )
-  const busy = companion.phase !== 'idle' || companion.continuous
+  const busy =
+    companion.phase !== 'idle' ||
+    companion.continuous ||
+    (companion.playMode && (capturePhase !== 'idle' || playing))
+  const preparingMusicRoom = companion.playMode && companion.phase === 'speaking'
   const showAmazingGrace = companion.playMode || (!saved.profile?.onboarding && busy)
   const history = mergeTurns(saved.history, companion.turns)
   const companionRef = useRef<HTMLElement | null>(null)
@@ -254,6 +272,39 @@ export default function App({ debug = false }: { debug?: boolean }) {
     },
     [music],
   )
+  useEffect(() => {
+    if (!companion.playMode) {
+      engineStarted.current = false
+      music.stop()
+      return
+    }
+    if (companion.phase !== 'idle' || engineStarted.current) return
+    engineStarted.current = true
+    let active = true
+    setMusicError('')
+    setCapturePhase('recording')
+    void music.captureAndCompose(setCapturePhase).then(
+      (isPlaying) => {
+        if (active) {
+          setCapturePhase('idle')
+          setPlaying(isPlaying)
+        }
+      },
+      (error: unknown) => {
+        if (active) {
+          setCapturePhase('idle')
+          setMusicError(
+            error instanceof Error
+              ? error.message
+              : 'The audio engine could not create music.',
+          )
+        }
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [companion.phase, companion.playMode, music])
 
   const playInstrument = useCallback(
     async (instrument: Instrument) => {
@@ -273,6 +324,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   const stopAll = () => {
     music.stop()
+    setCapturePhase('idle')
     setPlaying(false)
     companion.stop()
   }
@@ -333,6 +385,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
   function onMicrophone() {
+    if (capturePhase === 'recording') {
+      music.finishCapture()
+      return
+    }
+    if (capturePhase === 'composing') return
     if (companion.continuous) {
       void companion.stop()
       return
@@ -551,7 +608,20 @@ export default function App({ debug = false }: { debug?: boolean }) {
               </button>
             </div>
             {showAmazingGrace ? (
-              <AmazingGraceArtwork src={amazingGraceImage} />
+              <AmazingGraceArtwork src={amazingGraceImage}>
+                {capturePhase === 'composing' && (
+                  <div className="composer-overlay" role="status">
+                    <SoundFlux
+                      className="composer-logo"
+                      state="thinking"
+                      size={180}
+                      showBrand={false}
+                      showStatus={false}
+                    />
+                    <span>Creating your music…</span>
+                  </div>
+                )}
+              </AmazingGraceArtwork>
             ) : companion.phase !== 'idle' ? (
               <div className="record-art">
                 <SoundFlux
@@ -601,23 +671,33 @@ export default function App({ debug = false }: { debug?: boolean }) {
             )}
             <div className="voice-controls">
               <button
-                className={`microphone-button ${companion.phase === 'recording' ? 'recording' : ''}`}
+                className={`microphone-button ${capturePhase === 'recording' || companion.phase === 'recording' ? 'recording' : ''}`}
                 onClick={onMicrophone}
                 disabled={
+                  capturePhase === 'composing' ||
+                  preparingMusicRoom ||
                   !companion.continuous &&
                   (companion.phase === 'permission' ||
                     companion.phase === 'transcribing')
                 }
               >
-                {companion.phase === 'recording' ? (
+                {capturePhase === 'recording' || companion.phase === 'recording' ? (
                   <Square size={17} fill="currentColor" />
+                ) : capturePhase === 'composing' || preparingMusicRoom ? (
+                  <LoaderCircle className="animate-spin" size={21} />
                 ) : companion.phase === 'permission' ||
                   companion.phase === 'transcribing' ? (
                   <LoaderCircle className="animate-spin" size={21} />
                 ) : (
                   <Mic size={21} />
                 )}
-                {companion.continuous
+                {capturePhase === 'recording'
+                  ? 'Humming…'
+                  : capturePhase === 'composing'
+                    ? 'Creating your music…'
+                    : preparingMusicRoom
+                      ? 'Preparing your music room…'
+                  : companion.continuous
                   ? 'End conversation'
                   : companion.phase === 'permission'
                       ? 'Opening microphone …'

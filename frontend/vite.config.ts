@@ -17,6 +17,19 @@ export default defineConfig(({ mode }) => {
           ws: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
         },
+        '/engine': {
+          target: env.AUDIO_ENGINE_TARGET || 'http://127.0.0.1:7860',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/engine/, ''),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (request) =>
+              request.setHeader(
+                'origin',
+                env.AUDIO_ENGINE_TARGET || 'http://127.0.0.1:7860',
+              ),
+            )
+          },
+        },
       },
     },
   }

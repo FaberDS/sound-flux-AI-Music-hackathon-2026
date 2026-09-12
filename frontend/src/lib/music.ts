@@ -1,11 +1,20 @@
 export type Instrument = 'piano' | 'guitar' | 'bells' | 'drum'
 export type Mood = 'calm' | 'bright'
+export type CapturePhase = 'idle' | 'recording' | 'composing'
 
 export class MusicRoom {
   private context: AudioContext | null = null
   private gain: GainNode | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private voices = new Set<AudioScheduledSourceNode>()
+  private loop: AudioBufferSourceNode | null = null
+  private stream: MediaStream | null = null
+  private input: MediaStreamAudioSourceNode | null = null
+  private analyser: AnalyserNode | null = null
+  private recorder: MediaRecorder | null = null
+  private captureTimer: ReturnType<typeof setInterval> | null = null
+  private onCapturePhaseChange: ((phase: CapturePhase) => void) | null = null
+  private request: AbortController | null = null
   private epoch = 0
   private volume = 0.45
   private noteIndex = 0
@@ -121,10 +130,237 @@ export class MusicRoom {
     return true
   }
 
+  async captureAndCompose(
+    onCapturePhaseChange: (phase: CapturePhase) => void,
+  ) {
+    this.stop()
+    const epoch = this.epoch
+    const audio = await this.capture(epoch, onCapturePhaseChange)
+    if (!audio || epoch !== this.epoch) {
+      onCapturePhaseChange('idle')
+      return false
+    }
+
+    const controller = new AbortController()
+    this.request = controller
+    onCapturePhaseChange('composing')
+    try {
+      await this.waitForEngine(controller.signal, epoch)
+      if (epoch !== this.epoch) return false
+      const form = new FormData()
+      form.append('audio', audio)
+      form.append('settings', '{}')
+      const response = await fetch('/engine/api/compose', {
+        method: 'POST',
+        body: form,
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(
+          typeof body.detail === 'string'
+            ? body.detail
+            : 'The audio engine could not create music.',
+        )
+      }
+      const buffer = await this.context!.decodeAudioData(
+        await response.arrayBuffer(),
+      )
+      if (epoch !== this.epoch) return false
+      this.loop = this.context!.createBufferSource()
+      this.loop.buffer = buffer
+      this.loop.loop = true
+      this.loop.connect(this.gain!)
+      this.loop.start()
+      onCapturePhaseChange('idle')
+      return true
+    } catch (error) {
+      onCapturePhaseChange('idle')
+      if (epoch !== this.epoch || controller.signal.aborted) return false
+      throw error
+    } finally {
+      if (this.request === controller) this.request = null
+    }
+  }
+
+  finishCapture() {
+    const recorder = this.recorder
+    if (!recorder || recorder.state === 'inactive') return
+    if (this.captureTimer) clearInterval(this.captureTimer)
+    this.captureTimer = null
+    this.onCapturePhaseChange?.('composing')
+    recorder.stop()
+  }
+
+  private async capture(
+    epoch: number,
+    onCapturePhaseChange: (phase: CapturePhase) => void,
+  ) {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
+      throw new Error('This browser cannot record a melody here.')
+    await this.ready()
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    })
+    if (epoch !== this.epoch) {
+      stream.getTracks().forEach((track) => track.stop())
+      return null
+    }
+    const context = this.context!
+    const chunks: Blob[] = []
+    const recorder = new MediaRecorder(stream)
+    this.stream = stream
+    this.input = context.createMediaStreamSource(stream)
+    this.analyser = context.createAnalyser()
+    this.analyser.fftSize = 2048
+    this.input.connect(this.analyser)
+    recorder.ondataavailable = ({ data }) => {
+      if (data.size) chunks.push(data)
+    }
+    this.recorder = recorder
+    this.onCapturePhaseChange = onCapturePhaseChange
+    recorder.start(250)
+    onCapturePhaseChange('recording')
+
+    return new Promise<File | null>((resolve, reject) => {
+      const samples = new Float32Array(this.analyser!.fftSize)
+      const startedAt = performance.now()
+      let heardAudio = false
+      let lastAudioAt = startedAt
+      let finished = false
+      const finish = () => {
+        if (finished) return
+        finished = true
+        if (this.captureTimer) clearInterval(this.captureTimer)
+        this.captureTimer = null
+        this.onCapturePhaseChange?.('composing')
+        if (recorder.state !== 'inactive') recorder.stop()
+      }
+      recorder.onerror = () => {
+        this.releaseMicrophone(recorder)
+        reject(new Error('The microphone recording could not finish.'))
+      }
+      recorder.onstop = async () => {
+        this.releaseMicrophone(recorder)
+        if (!heardAudio || epoch !== this.epoch) return resolve(null)
+        try {
+          const input = await context.decodeAudioData(
+            await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer(),
+          )
+          const audio = input.getChannelData(0).slice(0, input.sampleRate * 30)
+          resolve(
+            audio.length >= input.sampleRate
+              ? new File([this.encodeWav(audio, input.sampleRate)], 'melody.wav', {
+                  type: 'audio/wav',
+                })
+              : null,
+          )
+        } catch {
+          reject(new Error('The melody could not be read. Please try again.'))
+        }
+      }
+      this.captureTimer = setInterval(() => {
+        this.analyser?.getFloatTimeDomainData(samples)
+        let energy = 0
+        for (const sample of samples) energy += sample * sample
+        const now = performance.now()
+        if (Math.sqrt(energy / samples.length) >= 0.012) {
+          heardAudio = true
+          lastAudioAt = now
+        }
+        if (
+          now - startedAt >= 30_000 ||
+          (heardAudio && now - startedAt >= 1_000 && now - lastAudioAt >= 1_200)
+        )
+          finish()
+      }, 100)
+    })
+  }
+
+  private releaseMicrophone(recorder?: MediaRecorder) {
+    if (recorder && this.recorder !== recorder) return
+    if (this.captureTimer) clearInterval(this.captureTimer)
+    this.captureTimer = null
+    this.stream?.getTracks().forEach((track) => track.stop())
+    this.input?.disconnect()
+    this.analyser?.disconnect()
+    this.stream = this.input = this.analyser = this.recorder = null
+  }
+
+  private async waitForEngine(signal: AbortSignal, epoch: number) {
+    let setupRequested = false
+    while (epoch === this.epoch) {
+      const response = await fetch('/engine/api/status', { signal })
+      if (!response.ok) throw new Error('The audio engine is unavailable.')
+      const status = await response.json()
+      if (status.ready) return
+      if (setupRequested && !status.setup?.busy)
+        throw new Error(status.message || 'The audio engine is not ready.')
+      if (!status.setup?.busy) {
+        setupRequested = true
+        const setup = await fetch('/engine/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          signal,
+        })
+        if (!setup.ok) throw new Error('The audio engine could not start.')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000))
+    }
+  }
+
+  private encodeWav(samples: Float32Array, sampleRate: number) {
+    const wav = new ArrayBuffer(44 + samples.length * 2)
+    const view = new DataView(wav)
+    const text = (offset: number, value: string) =>
+      [...value].forEach((character, index) =>
+        view.setUint8(offset + index, character.charCodeAt(0)),
+      )
+    text(0, 'RIFF')
+    view.setUint32(4, 36 + samples.length * 2, true)
+    text(8, 'WAVE')
+    text(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    text(36, 'data')
+    view.setUint32(40, samples.length * 2, true)
+    samples.forEach((sample, index) =>
+      view.setInt16(
+        44 + index * 2,
+        Math.round(Math.max(-1, Math.min(1, sample)) * (sample < 0 ? 32768 : 32767)),
+        true,
+      ),
+    )
+    return wav
+  }
+
   stop() {
     this.epoch++
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    this.request?.abort()
+    this.request = null
+    this.onCapturePhaseChange?.('idle')
+    this.onCapturePhaseChange = null
+    const recorder = this.recorder
+    if (recorder && recorder.state !== 'inactive') recorder.stop()
+    this.releaseMicrophone()
+    if (this.loop) {
+      this.loop.stop()
+      this.loop.disconnect()
+      this.loop = null
+    }
     this.voices.forEach((voice) => {
       try {
         voice.stop()
