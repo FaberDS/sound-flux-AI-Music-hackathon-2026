@@ -43,6 +43,9 @@ import {
   onboardingQuestion,
   welcomeText,
 } from './lib/savedData'
+import amazingGraceChurch from '../assets/amazing_grace/church.webp'
+import amazingGraceSundown from '../assets/amazing_grace/sundown.webp'
+import amazingGraceWedding from '../assets/amazing_grace/wedding.webp'
 
 const instruments = [
   {
@@ -82,6 +85,21 @@ const phaseText: Record<Phase, string> = {
   transcribing: 'Deine Worte werden erkannt …',
   thinking: 'Deine Antwort entsteht …',
   speaking: 'Sound Flux spricht …',
+}
+
+const amazingGraceImages = [
+  amazingGraceChurch,
+  amazingGraceSundown,
+  amazingGraceWedding,
+]
+
+const debugPhaseText: Record<Phase, string> = {
+  idle: 'Ready',
+  permission: 'Opening microphone…',
+  recording: 'Listening…',
+  transcribing: 'Understanding your words…',
+  thinking: 'Thinking…',
+  speaking: 'Speaking…',
 }
 
 function Dialog({
@@ -162,6 +180,14 @@ function RecordArtwork({ active }: { active: boolean }) {
   )
 }
 
+function AmazingGraceArtwork({ src }: { src: string }) {
+  return (
+    <div className="amazing-grace-art" aria-label="Amazing Grace artwork">
+      <img src={src} alt="Amazing Grace memory" />
+    </div>
+  )
+}
+
 export default function App({ debug = false }: { debug?: boolean }) {
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
@@ -174,6 +200,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
   >('checking')
   const [musicError, setMusicError] = useState('')
   const [seeding, setSeeding] = useState(false)
+  const [amazingGraceImage] = useState(
+    () => amazingGraceImages[Math.floor(Math.random() * amazingGraceImages.length)],
+  )
   const [activeInstrument, setActiveInstrument] = useState<Instrument | null>(
     null,
   )
@@ -188,8 +217,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
     volume,
     refreshSaved,
     saved.profile?.onboarding ?? null,
+    saved.profile?.properties.find((property) => property.key === 'name')
+      ?.value ?? '',
   )
   const busy = companion.phase !== 'idle' || companion.continuous
+  const showAmazingGrace = !saved.profile?.onboarding && busy
   const history = mergeTurns(saved.history, companion.turns)
   const companionRef = useRef<HTMLElement | null>(null)
 
@@ -357,7 +389,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     if (!window.confirm('Alle gespeicherten Profil- und Chat-Daten löschen?')) return
     try {
       await saved.erase('all', companion.stop)
-      companion.reset()
+      window.location.reload()
     } catch {
       setConnection('offline')
     }
@@ -367,59 +399,60 @@ export default function App({ debug = false }: { debug?: boolean }) {
     return (
       <main className="debug-page">
         <header>
-          <div><p>Sound Flux</p><h1>Live debug</h1></div>
-          <a href="/">Companion öffnen</a>
+          <div><p>Sound Flux</p><h1>Live companion</h1></div>
+          <a href="/">Open companion</a>
         </header>
         <section>
           <div className={`debug-status ${connection}`}>
-            API: {connection}
+            Voice service: {connection === 'online' ? 'ready' : connection === 'offline' ? 'offline' : 'checking'}
           </div>
-          <button onClick={() => void refreshConnection()}>Aktualisieren</button>
+          <button onClick={() => void refreshConnection()}>Check connection</button>
           <button onClick={() => void preseed()} disabled={seeding}>
-            {seeding ? 'Wird gefüllt …' : 'Onboarding mit Beispieldaten füllen'}
+            {seeding ? 'Adding sample data…' : 'Add sample profile'}
           </button>
           <button onClick={() => void clearDebugData()} disabled={saved.busy}>
-            Alle Daten löschen
+            Clear all data
           </button>
         </section>
         <section>
-          <h2>Live-Sitzung</h2>
+          <h2>Conversation</h2>
+          {showAmazingGrace && <AmazingGraceArtwork src={amazingGraceImage} />}
           <button onClick={onMicrophone}>
-            {companion.continuous ? 'Gespräch beenden' : 'Start listening'}
+            {companion.continuous ? 'End conversation' : 'Start listening'}
           </button>
-          <p>Status: {companion.phase}</p>
-          {companion.transcript && <p>Du: {companion.transcript}</p>}
-          {companion.answer && <p>Begleiter: {companion.answer}</p>}
+          <p>Status: {debugPhaseText[companion.phase]}</p>
+          {companion.transcript && <p>You: {companion.transcript}</p>}
+          {companion.answer && <p>Companion: {companion.answer}</p>}
           {companion.error && <p>{companion.error}</p>}
         </section>
         <section>
-          <h2>Profil-Schlüssel</h2>
+          <h2>Your profile</h2>
           <table>
-            <thead><tr><th>Schlüssel</th><th>Kategorie</th><th>Wert</th></tr></thead>
+            <thead><tr><th>Property</th><th>Value</th></tr></thead>
             <tbody>
               {(saved.profile?.properties ?? []).map((property) => (
                 <tr key={property.key}>
-                  <td><code>{property.key}</code></td><td>{property.category}</td><td>{property.value}</td>
+                  <td>{property.label}</td><td>{property.value}</td>
                 </tr>
               ))}
               {!saved.loading && !saved.profile?.properties.length && (
-                <tr><td colSpan={3}>Noch keine Profilwerte.</td></tr>
+                <tr><td colSpan={2}>No profile details saved yet.</td></tr>
               )}
             </tbody>
           </table>
         </section>
         <section>
-          <h2>Chat-Verlauf</h2>
+          <h2>Conversation history</h2>
           <table>
-            <thead><tr><th>Zeit</th><th>Du</th><th>Modell</th><th>Begleiter</th><th>Dauer</th></tr></thead>
+            <thead><tr><th>Time</th><th>You</th><th>Companion</th></tr></thead>
             <tbody>
               {history.map((turn) => (
                 <tr key={turn.turn_id}>
-                  <td>{historyTime(turn.created_at)}</td><td>{turn.user}</td><td>{turn.model || '–'}</td><td>{turn.assistant}</td><td>{turn.duration_ms} ms</td>
+                  <td>{historyTime(turn.created_at)}</td><td>{turn.user}</td><td>{turn.assistant}</td>
                 </tr>
               ))}
               {!saved.loading && !history.length && (
-                <tr><td colSpan={5}>Noch keine gespeicherten Gespräche.</td></tr>
+                <tr><td colSpan={3}>No saved conversations yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -564,7 +597,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
                     : 'Sprache offline'}
               </button>
             </div>
-            {companion.phase !== 'idle' ? (
+            {showAmazingGrace ? (
+              <AmazingGraceArtwork src={amazingGraceImage} />
+            ) : companion.phase !== 'idle' ? (
               <div className="record-art">
                 <SoundFlux
                   state={

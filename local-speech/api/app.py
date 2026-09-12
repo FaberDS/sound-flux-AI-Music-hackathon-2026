@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import io
 import json
+import logging
 import os
 import random
 import re
@@ -20,8 +21,13 @@ import httpx
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from mlx_audio.stt.generate import generate_transcription
+from mlx_audio.stt.utils import load_model as load_stt_model
 from mlx_audio.tts.utils import load_model
 from pydantic import BaseModel, Field
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
@@ -31,6 +37,7 @@ DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3.5:2b")
 DEFAULT_TTS_MODEL = os.getenv("TTS_MODEL", "mlx-community/Kokoro-82M-8bit")
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 LIVE_WINDOW_SECONDS = 4
+LIVE_TRANSCRIPTION_TIMEOUT_SECONDS = 45
 DB_PATH = Path(os.getenv("PROFILE_DB", Path(__file__).with_name("sound_flux.db")))
 ONBOARDING_QUESTIONS = (
     ("name", "Name", "Personal", "What should I call you?"),
@@ -93,11 +100,23 @@ def synthesize_tts(model, text: str, voice: str) -> bytes:
         return output.getvalue()
 
 
+def transcribe_wav(model, wav: Path, output_base: Path) -> tuple[str, list[dict]]:
+    result = generate_transcription(
+        model=model,
+        audio=str(wav),
+        output_path=str(output_base),
+        format="json",
+        language="en",
+    )
+    return transcript_text({"text": result.text}), result.segments or []
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    model = await asyncio.to_thread(load_model, DEFAULT_TTS_MODEL)
-    await asyncio.to_thread(synthesize_tts, model, "Ready.", "af_heart")
-    app.state.tts_model = model
+    tts_model = await asyncio.to_thread(load_model, DEFAULT_TTS_MODEL)
+    await asyncio.to_thread(synthesize_tts, tts_model, "Ready.", "af_heart")
+    app.state.tts_model = tts_model
+    app.state.stt_model = await asyncio.to_thread(load_stt_model, DEFAULT_STT_MODEL)
     yield
 
 
@@ -106,6 +125,7 @@ cancel_events: dict[str, asyncio.Event] = {}
 active_processes: defaultdict[str, set[asyncio.subprocess.Process]] = defaultdict(set)
 active_chat_tasks: dict[str, asyncio.Task] = {}
 tts_lock = asyncio.Lock()
+stt_lock = asyncio.Lock()
 # ponytail: global request lock; per-user throttling if this becomes multi-user.
 musicbrainz_lock = asyncio.Lock()
 musicbrainz_last_request = 0.0
@@ -423,6 +443,7 @@ async def stop_turn(turn_id: str) -> bool:
     for process in tuple(active_processes.get(turn_id, ())):
         if process.returncode is None:
             process.terminate()
+    logger.info("[turn %s] interrupted=%s", turn_id, event is not None)
     return True
 
 
@@ -476,11 +497,9 @@ async def transcribe_pcm(turn_id: str, directory: Path, pcm: bytes, sample_rate:
         turn_id, "ffmpeg", "-y", "-i", str(source), "-ar", "16000", "-ac", "1",
         "-c:a", "pcm_s16le", str(wav),
     )
-    await run_process(
-        turn_id, sys.executable, "-m", "mlx_audio.stt.generate", "--model", DEFAULT_STT_MODEL,
-        "--audio", str(wav), "--format", "json", "--output-path", str(output_base),
-    )
-    return transcript_text(json.loads(output_base.with_suffix(".json").read_text()))
+    async with stt_lock:
+        text, _ = await asyncio.to_thread(transcribe_wav, app.state.stt_model, wav, output_base)
+        return text
 
 
 @app.get("/health")
@@ -542,6 +561,7 @@ async def clear_data():
 @app.websocket("/v1/live/{turn_id}")
 async def live_transcription(websocket: WebSocket, turn_id: str):
     await websocket.accept()
+    logger.info("[turn %s] live socket accepted", turn_id)
     sample_rate = 48_000
     audio = bytearray()
     changed = asyncio.Event()
@@ -549,8 +569,30 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
 
     async def recognize():
         last_size = 0
+        last_text = ""
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)
+
+            async def transcribe_live(pcm: bytes, stage: str) -> str:
+                started = time.perf_counter()
+                logger.info("[turn %s] live %s transcription started bytes=%d", turn_id, stage, len(pcm))
+                try:
+                    text = await asyncio.wait_for(
+                        transcribe_pcm(turn_id, directory_path, pcm, sample_rate),
+                        timeout=LIVE_TRANSCRIPTION_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError as error:
+                    logger.warning(
+                        "[turn %s] live %s transcription timed out after %ss",
+                        turn_id, stage, LIVE_TRANSCRIPTION_TIMEOUT_SECONDS,
+                    )
+                    raise HTTPException(504, "Speech recognition took too long. Please try again.") from error
+                logger.info(
+                    "[turn %s] live %s transcription completed chars=%d elapsed=%.2fs",
+                    turn_id, stage, len(text), time.perf_counter() - started,
+                )
+                return text
+
             while not stopped.is_set():
                 await changed.wait()
                 changed.clear()
@@ -563,18 +605,28 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
                 window = bytes(audio[-sample_rate * 2 * LIVE_WINDOW_SECONDS:])
                 if len(window) < sample_rate * 2:
                     continue
-                text = await transcribe_pcm(turn_id, directory_path, window, sample_rate)
+                text = await transcribe_live(window, "partial")
+                last_text = text
                 await websocket.send_json({"type": "partial", "text": text})
             if audio:
-                text = await transcribe_pcm(turn_id, directory_path, bytes(audio), sample_rate)
+                # For a short utterance, return the latest live result instead of launching
+                # Whisper again after Stop. This keeps the name-question handoff responsive.
+                if last_text and len(audio) <= sample_rate * 2 * LIVE_WINDOW_SECONDS:
+                    text = last_text
+                    logger.info("[turn %s] live final reused partial chars=%d", turn_id, len(text))
+                else:
+                    text = await transcribe_live(bytes(audio), "final")
+                logger.info("[turn %s] live final bytes=%d text=%r", turn_id, len(audio), text)
                 await websocket.send_json({"type": "final", "text": text})
 
     async def recognize_with_errors():
         try:
             await recognize()
         except HTTPException as error:
+            logger.warning("[turn %s] live transcription error: %s", turn_id, error.detail)
             await websocket.send_json({"type": "error", "detail": error.detail})
         except Exception as error:
+            logger.exception("[turn %s] live transcription failed", turn_id)
             await websocket.send_json({"type": "error", "detail": str(error)})
 
     recognizer = asyncio.create_task(recognize_with_errors())
@@ -582,6 +634,10 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
     try:
         while True:
             message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                logger.info("[turn %s] live socket disconnected", turn_id)
+                stopped.set()
+                break
             if message.get("bytes"):
                 chunk = message["bytes"]
                 if len(audio) + len(chunk) > MAX_AUDIO_BYTES:
@@ -594,14 +650,17 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
                 payload = json.loads(message["text"])
                 if payload.get("type") == "start":
                     sample_rate = int(payload.get("sample_rate", sample_rate))
+                    logger.info("[turn %s] live started sample_rate=%d", turn_id, sample_rate)
                     if not 8_000 <= sample_rate <= 96_000:
                         raise ValueError("Unsupported sample rate")
                 if payload.get("type") == "stop":
                     normal_stop = True
+                    logger.info("[turn %s] live stopped bytes=%d", turn_id, len(audio))
                     stopped.set()
                     changed.set()
                     break
-    except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
+    except (WebSocketDisconnect, RuntimeError, ValueError, json.JSONDecodeError):
+        logger.warning("[turn %s] live socket disconnected or sent invalid data", turn_id)
         stopped.set()
     finally:
         stopped.set()
@@ -613,6 +672,7 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
         if normal_stop:
             # The final transcript immediately starts chat with this same turn ID.
             cancel_events.pop(turn_id, None)
+            logger.info("[turn %s] live handoff complete", turn_id)
         else:
             await stop_turn(turn_id)
 
@@ -633,18 +693,15 @@ async def transcribe(
                 if output.tell() + len(chunk) > MAX_AUDIO_BYTES:
                     raise HTTPException(413, "Audio is limited to 25 MB")
                 output.write(chunk)
-        wav = directory_path / "input.wav"
+        wav = directory_path / "normalized.wav"
         output_base = directory_path / "transcript"
         await run_process(
             current_turn, "ffmpeg", "-y", "-i", str(source), "-ar", "16000", "-ac", "1",
             "-c:a", "pcm_s16le", str(wav),
         )
-        await run_process(
-            current_turn, sys.executable, "-m", "mlx_audio.stt.generate", "--model", DEFAULT_STT_MODEL,
-            "--audio", str(wav), "--format", "json", "--output-path", str(output_base),
-        )
-        payload = json.loads(output_base.with_suffix(".json").read_text())
-    return {"turn_id": current_turn, "text": transcript_text(payload), "segments": payload.get("segments", [])}
+        async with stt_lock:
+            text, segments = await asyncio.to_thread(transcribe_wav, app.state.stt_model, wav, output_base)
+    return {"turn_id": current_turn, "text": text, "segments": segments}
 
 
 @app.post("/v1/chat")
@@ -654,17 +711,25 @@ async def chat(request: ChatRequest):
         raise HTTPException(409, "Turn interrupted")
     apply_profile_updates(request.message)
     apply_onboarding_answer(request.onboarding_key, request.message)
+    logger.info(
+        "[turn %s] chat received onboarding=%r message=%r",
+        request.turn_id,
+        request.onboarding_key,
+        request.message,
+    )
     record_interaction("user", request.message)
     follow_up = None if request.onboarding_key == "memorable_item" and is_skip_answer(request.message) else ONBOARDING_FOLLOW_UPS.get(request.onboarding_key)
     if isinstance(follow_up, tuple):
         follow_up = random.choice(follow_up)
     if follow_up:
+        logger.info("[turn %s] onboarding follow-up=%r", request.turn_id, follow_up)
         async def onboarding_stream():
             record_interaction("assistant", follow_up)
             record_chat(request.turn_id, request.message, "onboarding", follow_up, 0)
             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': follow_up})}\n\n"
             yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
             cancel_events.pop(request.turn_id, None)
+            logger.info("[turn %s] onboarding follow-up streamed", request.turn_id)
 
         return StreamingResponse(onboarding_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     songs = await search_musicbrainz(music_search_query(request.message)) if is_song_request(request.message) else []
@@ -684,6 +749,7 @@ async def chat(request: ChatRequest):
     async def stream():
         active_chat_tasks[request.turn_id] = asyncio.current_task()
         answer = []
+        logger.info("[turn %s] model request started model=%s", request.turn_id, request.model)
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120, read=None)) as client:
                 async with client.stream(
@@ -709,10 +775,13 @@ async def chat(request: ChatRequest):
                         assistant = "".join(answer)
                         record_interaction("assistant", assistant)
                         record_chat(request.turn_id, request.message, request.model, assistant, round((time.perf_counter() - started_at) * 1000))
+                        logger.info("[turn %s] model response completed chars=%d", request.turn_id, len(assistant))
                     yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
         except asyncio.CancelledError:
+            logger.info("[turn %s] model request cancelled", request.turn_id)
             return
         except httpx.HTTPError as error:
+            logger.warning("[turn %s] model request failed: %s", request.turn_id, error)
             yield f"event: error\ndata: {json.dumps({'detail': str(error)})}\n\n"
         finally:
             active_chat_tasks.pop(request.turn_id, None)
@@ -726,11 +795,13 @@ async def speech(request: SpeechRequest):
     event = event_for(request.turn_id)
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
+    logger.info("[turn %s] speech started chars=%d", request.turn_id, len(request.text))
     async with tts_lock:
         audio = await asyncio.to_thread(synthesize_tts, app.state.tts_model, request.text, request.voice)
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
     cancel_events.pop(request.turn_id, None)
+    logger.info("[turn %s] speech completed bytes=%d", request.turn_id, len(audio))
     return Response(audio, media_type="audio/wav", headers={"X-Turn-ID": request.turn_id})
 
 

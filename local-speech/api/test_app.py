@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import unittest
 
 import app
@@ -46,6 +47,29 @@ class InterruptTest(unittest.TestCase):
                 websocket.send_text(json.dumps({"type": "start", "sample_rate": 48_000}))
                 websocket.send_text(json.dumps({"type": "stop"}))
         self.assertNotIn(turn_id, app.cancel_events)
+
+    def test_short_live_stop_reuses_partial_transcription(self):
+        turn_id = "short-live-stop"
+        calls = []
+        original_transcribe = app.transcribe_pcm
+
+        async def fake_transcribe(_turn_id, _directory, pcm, _sample_rate):
+            calls.append(len(pcm))
+            return "Ada"
+
+        app.transcribe_pcm = fake_transcribe
+        try:
+            with TestClient(app.app) as client:
+                with client.websocket_connect(f"/v1/live/{turn_id}") as websocket:
+                    websocket.send_text(json.dumps({"type": "start", "sample_rate": 48_000}))
+                    websocket.send_bytes(b"\0\0" * 48_000)
+                    time.sleep(1)
+                    websocket.send_text(json.dumps({"type": "stop"}))
+                    self.assertEqual(websocket.receive_json()["text"], "Ada")
+                    self.assertEqual(websocket.receive_json(), {"type": "final", "text": "Ada"})
+            self.assertEqual(len(calls), 1)
+        finally:
+            app.transcribe_pcm = original_transcribe
 
     def test_profile_onboarding_and_correction(self):
         import tempfile

@@ -25,6 +25,7 @@ export function useCompanion(
   volume: number,
   onTurnFinished: () => void,
   onboarding: ProfileState['onboarding'],
+  name: string,
 ) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [transcript, setTranscript] = useState('')
@@ -49,7 +50,7 @@ export function useCompanion(
   const audioUrl = useRef<string | null>(null)
   const playbackGeneration = useRef(0)
   const pendingOnboardingKey = useRef<string | null>(null)
-  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished, onboarding })
+  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished, onboarding, name })
 
   const clearCapture = useCallback((closeSocket = true) => {
     if (timer.current) clearInterval(timer.current)
@@ -114,9 +115,9 @@ export function useCompanion(
   )
 
   useEffect(() => {
-    settings.current = { readAloud, volume, savedHistory, onTurnFinished, onboarding }
+    settings.current = { readAloud, volume, savedHistory, onTurnFinished, onboarding, name }
     if (player.current) player.current.volume = volume
-  }, [readAloud, volume, savedHistory, onTurnFinished, onboarding])
+  }, [readAloud, volume, savedHistory, onTurnFinished, onboarding, name])
   useEffect(() => {
     if (!readAloud) {
       player.current?.pause()
@@ -158,9 +159,10 @@ export function useCompanion(
     setPhase('idle')
     if (restartTimer.current) clearTimeout(restartTimer.current)
     if (continuousRef.current) {
+      setPhase('permission')
       restartTimer.current = setTimeout(() => {
         if (continuousRef.current && isCurrent(turn)) void startRecording(true)
-      }, 350)
+      }, 100)
     }
   }
 
@@ -376,27 +378,70 @@ export function useCompanion(
     }
   }
 
-  function startConversation() {
+  async function startConversation() {
     continuousRef.current = true
     setContinuous(true)
+    const turn = beginTurn()
+    setPhase('permission')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      fail(
+        new Error(
+          'This browser cannot use the microphone. Open the page over localhost or HTTPS.',
+        ),
+        turn,
+      )
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      })
+      stream.getTracks().forEach((track) => track.stop())
+      if (!isCurrent(turn)) return
+    } catch (cause) {
+      const denied =
+        cause instanceof DOMException &&
+        (cause.name === 'NotAllowedError' || cause.name === 'SecurityError')
+      fail(
+        new Error(
+          denied
+            ? 'The microphone is not allowed. Enable it in your browser.'
+            : 'No microphone is available. Check your microphone.',
+        ),
+        turn,
+      )
+      return
+    }
     const onboardingPrompt = settings.current.onboarding
-    if (onboardingPrompt) return startOnboarding(onboardingPrompt)
-    return startGreeting()
+    if (onboardingPrompt) return startOnboarding(onboardingPrompt, turn)
+    return startGreeting(turn)
   }
 
-  async function startOnboarding(onboarding: NonNullable<ProfileState['onboarding']>) {
+  async function startOnboarding(
+    onboarding: NonNullable<ProfileState['onboarding']>,
+    turn?: Turn,
+  ) {
     const prompt = onboarding.key === 'name'
       ? `Welcome to Sound Flux. I would like to get to know you a little better. ${onboarding.question}`
       : onboarding.question
-    return speakBeforeListening(prompt, onboarding.key)
+    return speakBeforeListening(prompt, onboarding.key, turn)
   }
 
-  async function startGreeting() {
-    return speakBeforeListening("Let's do some music.")
+  async function startGreeting(turn?: Turn) {
+    const name = settings.current.name ? `, ${settings.current.name}` : ''
+    return speakBeforeListening(
+      `Let's do some music${name}. I am glad you are here. Tell me what you would like to make or hear today.`,
+      null,
+      turn,
+    )
   }
 
-  async function speakBeforeListening(prompt: string, onboardingKey: string | null = null) {
-    const turn = beginTurn()
+  async function speakBeforeListening(
+    prompt: string,
+    onboardingKey: string | null = null,
+    existingTurn?: Turn,
+  ) {
+    const turn = existingTurn ?? beginTurn()
     pendingOnboardingKey.current = onboardingKey
     setAnswer(prompt)
     setPhase('thinking')

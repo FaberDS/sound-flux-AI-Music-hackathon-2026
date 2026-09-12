@@ -43,6 +43,9 @@ start_service() {
 
   printf '\n[%s] Starte in %s\n' "$service_name" "$service_directory"
   (
+    # Background services still write normal status logs to this terminal.
+    # Keep macOS job control from suspending them with SIGTTOU.
+    trap '' TTOU
     cd -- "$PROJECT_ROOT/$service_directory"
     exec "$@"
   ) &
