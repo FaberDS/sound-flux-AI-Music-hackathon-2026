@@ -5,7 +5,7 @@ export interface Message {
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
-async function request(
+export async function request(
   path: string,
   options: RequestInit = {},
   timeout = 180_000,
@@ -157,9 +157,9 @@ export async function createSpeech(
 
 export function interruptTurn(turnId: string) {
   // Local capture and playback stop first, even if the server cannot be reached.
-  void request(
+  return request(
     `/v1/turns/${encodeURIComponent(turnId)}/interrupt`,
     { method: 'POST' },
     4_000,
-  ).catch(() => {})
+  ).then(() => {})
 }

@@ -4,8 +4,9 @@ import {
   interruptTurn,
   streamReply,
   transcribe,
-  type Message,
 } from '../lib/api'
+import { chatContext, mergeTurns, type SavedTurn } from '../lib/savedData'
+import { SpeechPauseDetector } from '../lib/speechPause'
 
 export type Phase =
   'idle' | 'permission' | 'recording' | 'transcribing' | 'thinking' | 'speaking'
@@ -15,9 +16,10 @@ interface Turn {
 }
 
 export function useCompanion(
-  profile: string[],
+  savedHistory: SavedTurn[],
   readAloud: boolean,
   volume: number,
+  onTurnFinished: () => void,
 ) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [transcript, setTranscript] = useState('')
@@ -25,18 +27,25 @@ export function useCompanion(
   const [error, setError] = useState('')
   const [seconds, setSeconds] = useState(0)
   const [canReplay, setCanReplay] = useState(false)
-  const [history, setHistory] = useState<Message[]>([])
-  const historyRef = useRef<Message[]>([])
+  const [turns, setTurns] = useState<SavedTurn[]>([])
+  const turnsRef = useRef<SavedTurn[]>([])
+  const [continuous, setContinuous] = useState(false)
+  const continuousRef = useRef(false)
+  const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pauseDetector = useRef<SpeechPauseDetector | null>(null)
   const active = useRef<Turn | null>(null)
+  const pendingInterrupts = useRef(new Set<Promise<void>>())
   const recorder = useRef<MediaRecorder | null>(null)
   const media = useRef<MediaStream | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   const player = useRef<HTMLAudioElement | null>(null)
   const audioUrl = useRef<string | null>(null)
   const playbackGeneration = useRef(0)
-  const settings = useRef({ readAloud, volume })
+  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished })
 
   const clearCapture = useCallback(() => {
+    pauseDetector.current?.stop()
+    pauseDetector.current = null
     if (timer.current) clearInterval(timer.current)
     timer.current = null
     if (recorder.current?.state === 'recording') recorder.current.stop()
@@ -46,36 +55,50 @@ export function useCompanion(
   }, [])
 
   const cancel = useCallback(() => {
+    if (restartTimer.current) clearTimeout(restartTimer.current)
+    restartTimer.current = null
     playbackGeneration.current++
     const previous = active.current
     active.current = null
     previous?.controller.abort()
-    if (previous) interruptTurn(previous.id)
+    if (previous) {
+      const pending = interruptTurn(previous.id)
+      pendingInterrupts.current.add(pending)
+      void pending.finally(() => pendingInterrupts.current.delete(pending)).catch(() => {})
+    }
+    const interrupted = Promise.all([...pendingInterrupts.current]).then(() => {})
+    void interrupted.catch(() => {})
     clearCapture()
     if (player.current) {
       player.current.onended = null
+      player.current.onpause = null
       player.current.pause()
       player.current.currentTime = 0
     }
+    return interrupted
   }, [clearCapture])
 
   const stop = useCallback(() => {
-    cancel()
+    continuousRef.current = false
+    setContinuous(false)
+    const interrupted = cancel()
     setPhase('idle')
+    return interrupted
   }, [cancel])
 
   useEffect(
     () => () => {
-      cancel()
+      continuousRef.current = false
+      void cancel()
       if (audioUrl.current) URL.revokeObjectURL(audioUrl.current)
     },
     [cancel],
   )
 
   useEffect(() => {
-    settings.current = { readAloud, volume }
+    settings.current = { readAloud, volume, savedHistory, onTurnFinished }
     if (player.current) player.current.volume = volume
-  }, [readAloud, volume])
+  }, [readAloud, volume, savedHistory, onTurnFinished])
   useEffect(() => {
     if (!readAloud) {
       player.current?.pause()
@@ -86,7 +109,7 @@ export function useCompanion(
     active.current === turn && !turn.controller.signal.aborted
 
   function beginTurn() {
-    cancel()
+    void cancel()
     const turn = { id: crypto.randomUUID(), controller: new AbortController() }
     active.current = turn
     setError('')
@@ -101,8 +124,8 @@ export function useCompanion(
 
   function fail(cause: unknown, turn: Turn) {
     if (!isCurrent(turn)) return
-    cancel()
-    setPhase('idle')
+    void stop()
+    settings.current.onTurnFinished()
     setError(
       cause instanceof Error &&
         cause.name !== 'TypeError' &&
@@ -112,30 +135,51 @@ export function useCompanion(
     )
   }
 
+  function finishResponse(turn: Turn) {
+    if (!isCurrent(turn)) return
+    setPhase('idle')
+    if (restartTimer.current) clearTimeout(restartTimer.current)
+    if (continuousRef.current) {
+      restartTimer.current = setTimeout(() => {
+        if (continuousRef.current && isCurrent(turn)) void startRecording(true)
+      }, 350)
+    }
+  }
+
   async function respond(text: string, turn: Turn) {
     if (!isCurrent(turn)) return
     setTranscript(text)
     setPhase('thinking')
+    const startedAt = performance.now()
     try {
       const response = await streamReply(
         turn.id,
         text,
-        historyRef.current,
-        profile,
+        chatContext(
+          mergeTurns(settings.current.savedHistory, turnsRef.current),
+        ),
+        [],
         turn.controller.signal,
         (partial) => {
           if (isCurrent(turn)) setAnswer(partial)
         },
       )
       if (!isCurrent(turn)) return
-      historyRef.current = [
-        ...historyRef.current,
-        { role: 'user', content: text },
-        { role: 'assistant', content: response.slice(0, 4_000) },
-      ].slice(-12) as Message[]
-      setHistory([...historyRef.current])
+      turnsRef.current = [
+        ...turnsRef.current,
+        {
+          turn_id: turn.id,
+          created_at: new Date().toISOString(),
+          user: text,
+          assistant: response,
+          model: '',
+          duration_ms: Math.round(performance.now() - startedAt),
+        },
+      ]
+      setTurns([...turnsRef.current])
+      settings.current.onTurnFinished()
       if (!settings.current.readAloud) {
-        setPhase('idle')
+        finishResponse(turn)
         return
       }
       try {
@@ -146,7 +190,7 @@ export function useCompanion(
         )
         if (!isCurrent(turn)) return
         if (!settings.current.readAloud) {
-          setPhase('idle')
+          finishResponse(turn)
           return
         }
         audioUrl.current = URL.createObjectURL(blob)
@@ -155,21 +199,26 @@ export function useCompanion(
         player.current = audio
         setCanReplay(true)
         audio.onended = () => {
-          if (isCurrent(turn)) setPhase('idle')
+          finishResponse(turn)
         }
         audio.onpause = () => {
-          if (isCurrent(turn)) setPhase('idle')
+          finishResponse(turn)
         }
         try {
           await audio.play()
           if (isCurrent(turn)) setPhase('speaking')
           else audio.pause()
         } catch {
-          if (isCurrent(turn)) setPhase('idle')
+          if (isCurrent(turn)) {
+            void stop()
+            setError(
+              'Tippe auf „Antwort noch einmal hören“, um die Sprachausgabe zu starten.',
+            )
+          }
         }
       } catch {
         if (isCurrent(turn)) {
-          setPhase('idle')
+          void stop()
           setError(
             'Die Sprachausgabe ist gerade nicht verfügbar. Du kannst die Antwort hier lesen.',
           )
@@ -182,11 +231,18 @@ export function useCompanion(
 
   async function send(text: string) {
     if (!text.trim()) return
+    continuousRef.current = false
+    setContinuous(false)
     const turn = beginTurn()
     await respond(text.trim().slice(0, 4_000), turn)
   }
 
-  async function startRecording() {
+  async function startRecording(automatic = false) {
+    if (automatic && !continuousRef.current) return
+    if (!automatic) {
+      continuousRef.current = false
+      setContinuous(false)
+    }
     const turn = beginTurn()
     setPhase('permission')
     setSeconds(0)
@@ -253,12 +309,33 @@ export function useCompanion(
         }
       }
       capture.start(1_000)
+      if (automatic) {
+        const detector = new SpeechPauseDetector(stream)
+        pauseDetector.current = detector
+        await detector.start(() => {
+          if (isCurrent(turn) && capture.state === 'recording')
+            finishRecording()
+        })
+        if (!isCurrent(turn)) {
+          detector.stop()
+          return
+        }
+      }
       setPhase('recording')
       const startedAt = Date.now()
       timer.current = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startedAt) / 1_000)
         setSeconds(elapsed)
-        if (elapsed >= 60 && capture.state === 'recording') capture.stop()
+        if (elapsed >= 60 && capture.state === 'recording') {
+          if (automatic && !pauseDetector.current?.hasSpeech) {
+            fail(
+              new Error(
+                'Ich habe keine Stimme gehört. Starte das Gespräch erneut oder schreibe eine Nachricht.',
+              ),
+              turn,
+            )
+          } else capture.stop()
+        }
       }, 250)
     } catch (cause) {
       const denied =
@@ -275,6 +352,12 @@ export function useCompanion(
     }
   }
 
+  function startConversation() {
+    continuousRef.current = true
+    setContinuous(true)
+    return startRecording(true)
+  }
+
   function finishRecording() {
     if (recorder.current?.state === 'recording') {
       setPhase('transcribing')
@@ -284,6 +367,7 @@ export function useCompanion(
 
   async function replay() {
     if (!player.current) return
+    void stop()
     const generation = ++playbackGeneration.current
     const audio = player.current
     audio.currentTime = 0
@@ -306,9 +390,9 @@ export function useCompanion(
   }
 
   function reset() {
-    stop()
-    historyRef.current = []
-    setHistory([])
+    void stop()
+    turnsRef.current = []
+    setTurns([])
     setAnswer('')
     setTranscript('')
     setError('')
@@ -325,9 +409,11 @@ export function useCompanion(
     error,
     seconds,
     canReplay,
-    history,
+    turns,
+    continuous,
     send,
     startRecording,
+    startConversation,
     finishRecording,
     replay,
     stop,

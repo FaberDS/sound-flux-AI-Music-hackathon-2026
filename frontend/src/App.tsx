@@ -24,7 +24,6 @@ import {
   Pause,
   Piano,
   Play,
-  RotateCcw,
   Send,
   ShieldCheck,
   Square,
@@ -37,6 +36,10 @@ import { checkConnection } from './lib/api'
 import { MusicRoom, type Instrument, type Mood } from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
 import SoundFlux from './components/sound-flux/SoundFlux.jsx'
+import { ProfilePanel } from './components/ProfilePanel'
+import { SavedHistory } from './components/SavedHistory'
+import { useSavedData } from './hooks/useSavedData'
+import { mergeTurns, onboardingQuestion, welcomeText } from './lib/savedData'
 
 const instruments = [
   {
@@ -83,11 +86,13 @@ function Dialog({
   onClose,
   title,
   children,
+  dismissible = true,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  dismissible?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -98,8 +103,12 @@ function Dialog({
     <dialog
       ref={ref}
       onClose={onClose}
+      onCancel={(event) => {
+        event.preventDefault()
+        if (dismissible) onClose()
+      }}
       onClick={(event) => {
-        if (event.target === ref.current) onClose()
+        if (dismissible && event.target === ref.current) onClose()
       }}
       aria-label={title}
       className="room-dialog"
@@ -110,6 +119,7 @@ function Dialog({
           onClick={onClose}
           className="icon-button shrink-0"
           aria-label="Schließen"
+          disabled={!dismissible}
         >
           <X size={22} />
         </button>
@@ -155,10 +165,8 @@ export default function App() {
   const [volume, setVolume] = useState(0.45)
   const [readAloud, setReadAloud] = useState(true)
   const [dialog, setDialog] = useState<'help' | 'profile' | null>(null)
-  const [name, setName] = useState('')
-  const [preferences, setPreferences] = useState('')
-  const [profile, setProfile] = useState<string[]>([])
-  const [profileSaved, setProfileSaved] = useState(false)
+  const [handsFree, setHandsFree] = useState(false)
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
   const [connection, setConnection] = useState<
     'checking' | 'online' | 'offline'
   >('checking')
@@ -170,8 +178,11 @@ export default function App() {
   const [music] = useState(() => new MusicRoom())
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const healthRequest = useRef<AbortController | null>(null)
-  const companion = useCompanion(profile, readAloud, volume)
-  const busy = companion.phase !== 'idle'
+  const saved = useSavedData()
+  const refreshSaved = saved.refresh
+  const companion = useCompanion(saved.history, readAloud, volume, refreshSaved)
+  const busy = companion.phase !== 'idle' || companion.continuous
+  const history = mergeTurns(saved.history, companion.turns)
 
   const refreshConnection = useCallback(() => {
     healthRequest.current?.abort()
@@ -179,13 +190,16 @@ export default function App() {
     healthRequest.current = controller
     return checkConnection(controller.signal).then(
       () => {
-        if (!controller.signal.aborted) setConnection('online')
+        if (!controller.signal.aborted) {
+          setConnection('online')
+          void refreshSaved()
+        }
       },
       () => {
         if (!controller.signal.aborted) setConnection('offline')
       },
     )
-  }, [])
+  }, [refreshSaved])
 
   useEffect(() => {
     void refreshConnection()
@@ -284,13 +298,18 @@ export default function App() {
     }
   }
   function onMicrophone() {
+    if (companion.continuous) {
+      void companion.stop()
+      return
+    }
     if (companion.phase === 'recording') {
       companion.finishRecording()
       return
     }
     music.stop()
     setPlaying(false)
-    void companion.startRecording()
+    if (handsFree) void companion.startConversation()
+    else void companion.startRecording()
   }
   function sendMessage(event: FormEvent) {
     event.preventDefault()
@@ -300,26 +319,23 @@ export default function App() {
     void companion.send(message)
     setMessage('')
   }
-  function saveProfile(event: FormEvent) {
-    event.preventDefault()
-    setProfile([
-      ...(name.trim() ? [`Preferred name: ${name.trim()}`] : []),
-      ...(preferences.trim()
-        ? [`Music preferences: ${preferences.trim()}`]
-        : []),
-    ])
-    setProfileSaved(Boolean(name.trim() || preferences.trim()))
-    setDialog(null)
-  }
   function resetSession() {
     stopAll()
     companion.reset()
-    setProfile([])
-    setName('')
-    setPreferences('')
-    setProfileSaved(false)
     setMessage('')
     setDialog(null)
+  }
+
+  function openProfile() {
+    stopAll()
+    setDialog('profile')
+    void saved.refresh()
+  }
+
+  function afterDataDeleted() {
+    companion.reset()
+    setMessage('')
+    setOnboardingDismissed(false)
   }
 
   return (
@@ -351,7 +367,7 @@ export default function App() {
         <button
           className="companion-link"
           aria-label="Für Begleitpersonen"
-          onClick={() => setDialog('profile')}
+          onClick={openProfile}
         >
           <Users size={18} />
           <span>Für Begleitpersonen</span>
@@ -453,10 +469,16 @@ export default function App() {
                     : 'Sprache offline'}
               </button>
             </div>
-            {companion.phase === 'speaking' ? (
+            {companion.phase !== 'idle' ? (
               <div className="record-art">
                 <SoundFlux
-                  state="speaking"
+                  state={
+                    companion.phase === 'speaking'
+                      ? 'speaking'
+                      : companion.phase === 'recording'
+                        ? 'listening'
+                        : 'thinking'
+                  }
                   size={176}
                   showStatus={false}
                 />
@@ -476,19 +498,37 @@ export default function App() {
               <h2 className={companion.answer ? 'answer-text' : ''}>
                 {companion.answer ||
                   (companion.phase === 'idle'
-                    ? 'Was klingt für dich nach Freude?'
+                    ? welcomeText(saved.profile)
                     : phaseText[companion.phase])}
               </h2>
               {!companion.answer && (
                 <p>
                   {companion.phase === 'recording'
-                    ? 'Sprich in Ruhe. Tippe danach auf „Aufnahme senden“.'
+                    ? companion.continuous
+                      ? 'Sprich in Ruhe. Nach einer kurzen Pause antworte ich.'
+                      : 'Sprich in Ruhe. Tippe danach auf „Aufnahme senden“.'
                     : companion.phase === 'idle'
                       ? 'Erzähl von deiner Lieblingsmusik.'
                       : 'Du kannst jederzeit auf Stopp tippen.'}
                 </p>
               )}
             </div>
+            {saved.profile?.onboarding &&
+              !onboardingDismissed &&
+              !busy &&
+              !companion.answer && (
+                <div className="onboarding-offer">
+                  <p>
+                    {onboardingQuestion(saved.profile)} <span>Freiwillig.</span>
+                  </p>
+                  <div>
+                    <button onClick={openProfile}>Angaben ergänzen</button>
+                    <button onClick={() => setOnboardingDismissed(true)}>
+                      Später
+                    </button>
+                  </div>
+                </div>
+              )}
             {companion.error && (
               <p role="alert" className="error-message mt-3">
                 {companion.error}
@@ -499,8 +539,9 @@ export default function App() {
                 className={`microphone-button ${companion.phase === 'recording' ? 'recording' : ''}`}
                 onClick={onMicrophone}
                 disabled={
-                  companion.phase === 'permission' ||
-                  companion.phase === 'transcribing'
+                  !companion.continuous &&
+                  (companion.phase === 'permission' ||
+                    companion.phase === 'transcribing')
                 }
               >
                 {companion.phase === 'recording' ? (
@@ -511,13 +552,15 @@ export default function App() {
                 ) : (
                   <Mic size={21} />
                 )}
-                {companion.phase === 'recording'
-                  ? `Aufnahme senden · ${Math.floor(companion.seconds / 60)}:${String(companion.seconds % 60).padStart(2, '0')}`
-                  : companion.phase === 'permission'
-                    ? 'Mikrofon öffnen …'
-                    : companion.phase === 'transcribing'
-                      ? 'Worte erkennen …'
-                      : 'Mit Sound Flux sprechen'}
+                {companion.continuous
+                  ? 'Gespräch beenden'
+                  : companion.phase === 'recording'
+                    ? `Aufnahme senden · ${Math.floor(companion.seconds / 60)}:${String(companion.seconds % 60).padStart(2, '0')}`
+                    : companion.phase === 'permission'
+                      ? 'Mikrofon öffnen …'
+                      : companion.phase === 'transcribing'
+                        ? 'Worte erkennen …'
+                        : 'Mit Sound Flux sprechen'}
               </button>
               {busy && (
                 <button
@@ -529,6 +572,23 @@ export default function App() {
                 </button>
               )}
             </div>
+            <label className="hands-free-option">
+              <input
+                type="checkbox"
+                checked={handsFree}
+                onChange={(event) => {
+                  setHandsFree(event.target.checked)
+                  if (companion.continuous) void companion.stop()
+                }}
+              />
+              Nach Sprechpausen automatisch senden
+            </label>
+            {handsFree && (
+              <p className="hands-free-help">
+                Nach der Antwort höre ich wieder zu. Verwende Kopfhörer, damit
+                keine Rückkopplung entsteht.
+              </p>
+            )}
             <form className="message-form" onSubmit={sendMessage}>
               <Keyboard size={20} aria-hidden="true" />
               <label className="sr-only" htmlFor="message">
@@ -607,25 +667,13 @@ export default function App() {
             )}
           </div>
         </section>
-        {companion.history.length > 0 && (
-          <details className="conversation-history">
-            <summary>
-              Unser Gespräch{' '}
-              <span>
-                {companion.history.length / 2}{' '}
-                {companion.history.length === 2 ? 'Nachricht' : 'Nachrichten'}
-              </span>
-            </summary>
-            <div className="history-content">
-              {companion.history.map((item, index) => (
-                <p key={index}>
-                  <strong>{item.role === 'user' ? 'Du' : 'Sound Flux'}</strong>
-                  {item.content}
-                </p>
-              ))}
-            </div>
-          </details>
-        )}
+        <SavedHistory
+          turns={history}
+          loading={saved.loading}
+          error={saved.errors.history}
+          onRefresh={() => void saved.refresh()}
+          onManage={openProfile}
+        />
         <div className="session-toolbar">
           <span className="gentle-reminder">
             <Heart size={17} />
@@ -721,6 +769,11 @@ export default function App() {
             </div>
           </li>
         </ol>
+        <p className="dialog-intro">
+          Mit „Nach Sprechpausen automatisch senden“ genügt eine kurze Pause.
+          Nach der Antwort hört Sound Flux wieder zu, bis du das Gespräch
+          beendest.
+        </p>
         <p className="dialog-note">
           Mit „Alles stoppen“ enden Musik, Aufnahme und Sprachausgabe sofort.
           Wenn die Sprachbegleitung offline ist, funktionieren die Instrumente
@@ -734,53 +787,21 @@ export default function App() {
         open={dialog === 'profile'}
         onClose={() => setDialog(null)}
         title="Gemeinsam Musik erleben"
+        dismissible={!saved.busy}
       >
-        <p className="dialog-intro">
-          Ein paar freiwillige Angaben helfen Sound Flux, auf die Person
-          einzugehen, die du begleitest.
-        </p>
-        <form onSubmit={saveProfile} className="profile-form">
-          <label>
-            Wie darf Sound Flux die Person ansprechen?
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={80}
-              placeholder="Vorname, optional"
-              autoComplete="off"
-            />
-          </label>
-          <label>
-            Welche Musik mag die Person?
-            <textarea
-              value={preferences}
-              onChange={(event) => setPreferences(event.target.value)}
-              maxLength={600}
-              placeholder="Zum Beispiel: Klavier, Walzer oder ruhige Gitarrenmusik"
-              rows={3}
-            />
-          </label>
-          <p className="dialog-note">
-            <ShieldCheck size={19} />
-            Die lokale Sprach-API speichert Gespräche und daraus erkannte
-            Profilangaben auf diesem Mac. Wenn du die Sitzung beendest,
-            werden die Angaben und das Gespräch nur aus dieser Ansicht
-            entfernt.
-          </p>
-          <p className="text-sm leading-relaxed text-muted">
-            Die Instrumente und Melodien entstehen direkt im Browser. Die
-            Sprachbegleitung kann musikalische Ideen vorschlagen, aber keine
-            Lieblingsaufnahme abspielen.
-          </p>
-          <button className="dialog-primary" type="submit">
-            {profileSaved ? 'Angaben übernehmen' : 'Musikraum öffnen'}
-            <ArrowRight size={18} />
-          </button>
-        </form>
-        <button className="reset-session" onClick={resetSession}>
-          <RotateCcw size={16} />
-          Sitzung beenden und Ansicht leeren
-        </button>
+        {dialog === 'profile' && (
+          <ProfilePanel
+            key={saved.profile ? 'loaded' : 'loading'}
+            saved={saved}
+            beforeDelete={() => {
+              music.stop()
+              setPlaying(false)
+              return companion.stop()
+            }}
+            onDeleted={afterDataDeleted}
+            onEndSession={resetSession}
+          />
+        )}
       </Dialog>
     </div>
   )

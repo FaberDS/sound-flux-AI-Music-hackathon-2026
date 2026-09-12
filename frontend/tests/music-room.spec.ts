@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { mockSavedApi } from './saved-api'
 
 const reply = 'Lass uns mit ein paar sanften Klaviertönen beginnen.'
 const sse = (text = reply) =>
@@ -11,6 +12,7 @@ async function mockApi(page: Page) {
   await page.route('**/api/v1/turns/*/interrupt', (route) =>
     route.fulfill({ json: { interrupted: true } }),
   )
+  return mockSavedApi(page)
 }
 
 test('offline music, instruments and stop work without the speech API', async ({
@@ -41,10 +43,10 @@ test('offline music, instruments and stop work without the speech API', async ({
   expect(errors).toEqual([])
 })
 
-test('sends the profile and conversation history, then clears session data', async ({
+test('saves profile to the API and keeps it when ending a session', async ({
   page,
 }) => {
-  await mockApi(page)
+  const saved = await mockApi(page)
   const requests: {
     turn_id: string
     history: unknown[]
@@ -64,7 +66,9 @@ test('sends the profile and conversation history, then clears session data', asy
   await page
     .getByLabel('Welche Musik mag die Person?')
     .fill('Klavier und Walzer')
-  await page.getByRole('button', { name: 'Musikraum öffnen' }).click()
+  await page.getByRole('button', { name: 'Angaben speichern' }).click()
+  await expect(page.getByText('Angaben gespeichert.', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Schließen', exact: true }).click()
   await page.getByLabel('Nachricht an Sound Flux').fill('Ich mag Klavier.')
   await page
     .getByRole('button', { name: 'Nachricht senden', exact: true })
@@ -75,22 +79,20 @@ test('sends the profile and conversation history, then clears session data', asy
     .getByRole('button', { name: 'Nachricht senden', exact: true })
     .click()
   await expect(page.locator('summary')).toContainText('2 Nachrichten')
-  expect(requests[0].profile).toEqual([
-    'Preferred name: Anna',
-    'Music preferences: Klavier und Walzer',
-  ])
+  expect(requests[0].profile).toEqual([])
+  expect(saved.values).toEqual({ name: 'Anna', music_preferences: 'Klavier und Walzer' })
   expect(requests[0].history).toEqual([])
   expect(requests[1].history).toHaveLength(2)
   expect(requests[1].turn_id).not.toBe(requests[0].turn_id)
   await page.getByRole('button', { name: 'Für Begleitpersonen' }).click()
   await page
-    .getByRole('button', { name: 'Sitzung beenden und Ansicht leeren' })
+    .getByRole('button', { name: 'Sitzung beenden', exact: true })
     .click()
-  await expect(page.locator('summary')).toHaveCount(0)
+  await expect(page.locator('summary')).toContainText('0 Nachrichten')
   await page.getByRole('button', { name: 'Für Begleitpersonen' }).click()
   await expect(
     page.getByLabel('Wie darf Sound Flux die Person ansprechen?'),
-  ).toHaveValue('')
+  ).toHaveValue('Anna')
   expect(
     await page.evaluate(() => localStorage.length + sessionStorage.length),
   ).toBe(0)
@@ -198,7 +200,7 @@ test('server-sent errors stay visible and failed turns do not enter history', as
   await expect(page.getByRole('alert')).toContainText(
     'Die Antwort konnte nicht erstellt werden',
   )
-  await expect(page.locator('summary')).toHaveCount(0)
+  await expect(page.locator('summary')).toContainText('0 Nachrichten')
   await expect(
     page.getByRole('button', { name: 'Mit Sound Flux sprechen' }),
   ).toBeEnabled()
@@ -238,9 +240,9 @@ test('stopping a pending answer prevents stale output and speech', async ({
   await interruption
   release()
   await expect(
-    page.getByRole('heading', { name: 'Was klingt für dich nach Freude?' }),
+    page.getByRole('heading', { name: 'Schön, dass du da bist.' }),
   ).toBeVisible()
-  await expect(page.locator('summary')).toHaveCount(0)
+  await expect(page.locator('summary')).toContainText('0 Nachrichten')
   expect(speechCalls).toBe(0)
 })
 

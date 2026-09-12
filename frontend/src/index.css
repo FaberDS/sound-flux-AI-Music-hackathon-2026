@@ -1356,3 +1356,195 @@
     scroll-behavior: auto !important;
   }
 }
+
+@layer components {
+  .onboarding-offer {
+    grid-column: 2;
+    border-top: 1px solid var(--color-line);
+    padding-top: 11px;
+    margin-top: 9px;
+    font-size: 12px;
+    color: var(--color-brown);
+    text-align: center;
+  }
+  .onboarding-offer p span {
+    color: var(--color-muted);
+    font-size: 10px;
+  }
+  .onboarding-offer > div {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+  }
+  .onboarding-offer button {
+    min-height: 36px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-size: 11px;
+  }
+  .onboarding-offer button:last-child {
+    color: var(--color-muted);
+    text-decoration: none;
+  }
+  .hands-free-option {
+    grid-column: 2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    font-size: 11px;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .hands-free-option input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-brown);
+  }
+  .hands-free-help {
+    grid-column: 2;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--color-muted);
+    margin: -3px 0 8px;
+  }
+  .profile-fields {
+    display: grid;
+    gap: 18px;
+  }
+  .profile-fields:disabled {
+    opacity: 0.65;
+  }
+  .profile-field-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .profile-field-heading svg {
+    flex-shrink: 0;
+  }
+  .saved-load-error {
+    padding: 13px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+    background: #f8e8df;
+    border-radius: 7px;
+  }
+  .saved-load-error button {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    font-weight: 600;
+  }
+  .saved-data-actions {
+    border-top: 1px solid var(--color-line);
+    margin-top: 23px;
+    padding-top: 20px;
+  }
+  .saved-data-actions h3 {
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .saved-data-actions > p {
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--color-muted);
+    margin: 8px 0 14px;
+  }
+  .saved-data-actions button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 11px;
+    min-height: 44px;
+    padding: 9px 12px;
+    border: 1px solid #cbbcae;
+    border-radius: 6px;
+  }
+  .saved-data-actions button:hover {
+    background: #f4e6db;
+  }
+  .delete-confirmation {
+    margin-top: 15px;
+    border: 1px solid #d3b09c;
+    border-radius: 8px;
+    padding: 15px;
+    background: #f7e7db;
+  }
+  .delete-confirmation p {
+    font-size: 13px;
+    line-height: 1.7;
+    margin-bottom: 12px;
+  }
+  .delete-confirmation .confirm-delete {
+    background: var(--color-brown);
+    color: white;
+  }
+  .saved-notice {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-brown);
+  }
+  .saved-notice svg {
+    flex-shrink: 0;
+  }
+  .session-note {
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--color-muted);
+  }
+  .saved-note {
+    margin: 0 20px 18px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-muted);
+  }
+  .history-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 20px 8px;
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+  .history-tools button {
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .history-turn {
+    padding: 15px 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .history-turn time {
+    display: block;
+    font-size: 11px;
+    color: var(--color-muted);
+    margin-bottom: 14px;
+  }
+  .history-turn p + p {
+    margin-top: 12px;
+  }
+  .manage-history {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--color-brown);
+    min-height: 44px;
+    margin: 0 20px 10px;
+  }
+}
