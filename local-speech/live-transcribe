@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+model="$script_dir/models/ggml-large-v3-turbo.bin"
+
+[ -f "$model" ] || {
+  echo "Missing model: $model" >&2
+  exit 1
+}
+
+exec whisper-stream \
+  -m "$model" \
+  -l "${LIVE_STT_LANG:-en}" \
+  --step 500 \
+  --length 3000 \
+  --keep 200 \
+  --no-fallback \
+  "$@"

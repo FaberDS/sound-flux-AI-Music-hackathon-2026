@@ -1,0 +1,16 @@
+[project]
+name = "sound-flux-voice-api"
+version = "0.1.0"
+description = "Local STT, chat, and TTS API for Sound Flux"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "httpx>=0.28",
+  "mlx-audio>=0.3",
+  "misaki[en]>=0.9",
+  "python-multipart>=0.0.20",
+  "uvicorn[standard]>=0.34",
+]
+
+[tool.uv]
+package = false

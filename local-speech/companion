@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""A local music companion: chat, remembered preferences, optional microphone input."""
+
+import argparse
+import json
+import re
+import sqlite3
+import subprocess
+import tempfile
+import threading
+from pathlib import Path
+from queue import Empty, Queue
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parent
+DATABASE = ROOT / "companion.db"
+OLLAMA_CHAT = "http://127.0.0.1:11434/api/chat"
+MODEL_FILE = ROOT / "models" / "ggml-large-v3-turbo.bin"
+TRANSCRIPT = re.compile(r"^\[[^]]+\]\s+(.*)$")
+
+
+def connect():
+    db = sqlite3.connect(DATABASE, timeout=5)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS turns (
+            id INTEGER PRIMARY KEY,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS facts (
+            id INTEGER PRIMARY KEY,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            subject TEXT NOT NULL,
+            predicate TEXT NOT NULL,
+            object TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            source_turn_id INTEGER NOT NULL REFERENCES turns(id),
+            status TEXT NOT NULL DEFAULT 'confirmed',
+            UNIQUE(subject, predicate, object, status)
+        );
+        """
+    )
+    return db
+
+
+def save_turn(role, content):
+    with connect() as db:
+        cursor = db.execute("INSERT INTO turns(role, content) VALUES (?, ?)", (role, content))
+        return cursor.lastrowid
+
+
+def recent_turns(limit=8):
+    with connect() as db:
+        rows = db.execute(
+            "SELECT role, content FROM turns ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [{"role": role, "content": content} for role, content in reversed(rows)]
+
+
+def memory_for(question):
+    words = set(re.findall(r"[\w'-]+", question.lower()))
+    with connect() as db:
+        facts = db.execute(
+            "SELECT subject, predicate, object, kind FROM facts "
+            "WHERE status = 'confirmed' ORDER BY id DESC LIMIT 100"
+        ).fetchall()
+
+    ranked = []
+    for fact in facts:
+        text = " ".join(fact).lower()
+        score = len(words.intersection(re.findall(r"[\w'-]+", text)))
+        ranked.append((score, fact))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    selected = [fact for score, fact in ranked if score][:8]
+    if not selected:
+        selected = [fact for _, fact in ranked[:5]]
+    return "\n".join(f"- {predicate.replace('_', ' ')}: {object}" for _, predicate, object, _ in selected)
+
+
+def ollama(payload, stream=False):
+    payload["stream"] = stream
+    payload.setdefault("keep_alive", "30m")
+    request = Request(
+        OLLAMA_CHAT,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        return urlopen(request, timeout=120)
+    except URLError as error:
+        raise RuntimeError(
+            "Ollama is not running. Start it with `ollama serve`, then pull a model with "
+            "`ollama pull qwen3:14b`."
+        ) from error
+
+
+def answer(question, model):
+    memory = memory_for(question) or "No saved preferences yet."
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a warm, concise musical companion. Use the profile only as context, "
+                "not as unquestionable truth. Never claim a health diagnosis from movement data.\n"
+                f"Profile:\n{memory}"
+            ),
+        },
+        *recent_turns(),
+    ]
+    response = ollama({"model": model, "messages": messages, "think": False}, stream=True)
+    parts = []
+    for raw_line in response:
+        event = json.loads(raw_line)
+        token = event.get("message", {}).get("content", "")
+        if token:
+            print(token, end="", flush=True)
+            parts.append(token)
+    print()
+    return "".join(parts).strip()
+
+
+EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "facts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "predicate": {"type": "string"},
+                    "object": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["preference", "interest", "memory", "interaction", "ability", "goal"],
+                    },
+                    "confidence": {"type": "number"},
+                },
+                "required": ["predicate", "object", "kind", "confidence"],
+            },
+        }
+    },
+    "required": ["facts"],
+}
+
+
+def learn_in_background(turn_id, text, model):
+    prompt = (
+        "Extract only durable, explicitly stated facts about the user from this utterance. "
+        "Do not infer health conditions, diagnoses, identity, or facts the user did not say. "
+        "Return no facts when uncertain. Predicate must be concise snake_case.\n\n"
+        f"Utterance: {text}"
+    )
+    try:
+        response = ollama(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "format": EXTRACTION_SCHEMA,
+                "options": {"temperature": 0},
+                "think": False,
+            }
+        )
+        facts = json.loads(json.load(response)["message"]["content"]).get("facts", [])
+        with connect() as db:
+            for fact in facts:
+                confidence = float(fact["confidence"])
+                if not 0 <= confidence <= 1 or not fact["object"].strip():
+                    continue
+                db.execute(
+                    "INSERT OR IGNORE INTO facts(subject, predicate, object, kind, confidence, source_turn_id) "
+                    "VALUES ('user', ?, ?, ?, ?, ?)",
+                    (
+                        fact["predicate"].strip(),
+                        fact["object"].strip(),
+                        fact["kind"],
+                        confidence,
+                        turn_id,
+                    ),
+                )
+    except Exception:
+        pass  # Memory collection must never interrupt the conversation.
+
+
+def handle_turn(question, model, speak):
+    question = question.strip()
+    if not question:
+        return
+    turn_id = save_turn("user", question)
+    print("\nCompanion: ", end="", flush=True)
+    try:
+        reply = answer(question, model)
+    except RuntimeError as error:
+        print(error)
+        return
+    if reply:
+        save_turn("assistant", reply)
+        if speak:
+            subprocess.run(["say", reply], check=False)
+    threading.Thread(
+        target=learn_in_background, args=(turn_id, question, model), daemon=True
+    ).start()
+
+
+def microphone_turns(language):
+    if not MODEL_FILE.exists():
+        raise RuntimeError(f"Missing Whisper model: {MODEL_FILE}")
+    command = [
+        "whisper-stream", "-m", str(MODEL_FILE), "-l", language,
+        "--step", "0", "--length", "6000", "--vad-thold", "0.4", "--no-fallback",
+    ]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, bufsize=1)
+    lines = Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True).start()
+    block = []
+    try:
+        while process.poll() is None:
+            try:
+                line = lines.get(timeout=0.25).strip()
+            except Empty:
+                continue
+            if line.startswith("### Transcription") and line.endswith("START"):
+                block = []
+            elif match := TRANSCRIPT.match(line):
+                block.append(match.group(1).strip())
+            elif line.startswith("### Transcription") and line.endswith("END") and block:
+                yield " ".join(block)
+                block = []
+    finally:
+        process.terminate()
+
+
+def self_test():
+    global DATABASE
+    original_database = DATABASE
+    with tempfile.TemporaryDirectory() as directory:
+        DATABASE = Path(directory) / "companion.db"
+        turn_id = save_turn("user", "I enjoy humming Mozart.")
+        with connect() as db:
+            db.execute(
+                "INSERT INTO facts(subject, predicate, object, kind, confidence, source_turn_id) "
+                "VALUES ('user', 'enjoys', 'humming Mozart', 'preference', 1, ?)",
+                (turn_id,),
+            )
+        assert "humming Mozart" in memory_for("What should I hum?")
+    DATABASE = original_database
+    print("self-test: ok")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Local musical companion with remembered preferences.")
+    parser.add_argument("--model", default="qwen3:14b", help="Ollama model (default: qwen3:14b)")
+    parser.add_argument("--voice", action="store_true", help="take turns from the default microphone")
+    parser.add_argument("--speak", action="store_true", help="read replies with macOS say (use headphones)")
+    parser.add_argument("--lang", default="en", help="spoken language for Whisper (default: en)")
+    parser.add_argument("--self-test", action="store_true", help="verify local memory storage")
+    args = parser.parse_args()
+
+    if args.self_test:
+        self_test()
+        return
+
+    if args.voice:
+        print("Listening. Speak, then pause. Press Ctrl-C to stop.")
+        for question in microphone_turns(args.lang):
+            print(f"\nYou: {question}")
+            handle_turn(question, args.model, args.speak)
+        return
+
+    print("Music Companion. Type a message; use /quit to exit.")
+    while True:
+        try:
+            question = input("\nYou: ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if question.strip() in {"/quit", "/exit"}:
+            return
+        handle_turn(question, args.model, args.speak)
+
+
+if __name__ == "__main__":
+    main()

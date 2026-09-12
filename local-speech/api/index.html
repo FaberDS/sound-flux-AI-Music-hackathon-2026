@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sound Flux Voice Test</title>
+  <style>
+    body { font: 16px system-ui; max-width: 680px; margin: 3rem auto; padding: 0 1rem; }
+    button, input { font: inherit; padding: .65rem 1rem; } #recording { background: #b42318; color: white; }
+    form { display: flex; gap: .5rem; } input { flex: 1; min-width: 0; }
+    section { margin: 1.5rem 0; } #transcript, #answer { white-space: pre-wrap; min-height: 2em; }
+    small { color: #666; }
+  </style>
+  <h1>Sound Flux Voice Test</h1>
+  <button id="record">Start speaking</button>
+  <small id="status">Use headphones for interruption testing.</small>
+  <section><strong>You</strong><div id="transcript"></div></section>
+  <section><strong>Companion</strong><div id="answer"></div></section>
+  <audio id="reply" controls></audio>
+  <section>
+    <form id="message-form">
+      <input id="message" placeholder="Say or type a message" autocomplete="off">
+      <button>Ask companion</button>
+    </form>
+  </section>
+  <script>
+    const button = document.querySelector('#record');
+    const status = document.querySelector('#status');
+    const transcript = document.querySelector('#transcript');
+    const answer = document.querySelector('#answer');
+    const player = document.querySelector('#reply');
+    const messageForm = document.querySelector('#message-form');
+    const messageInput = document.querySelector('#message');
+    const history = [];
+    let socket, stream, context, source, processor, controller, turnId, audioFrames;
+
+    const newTurn = () => crypto.randomUUID();
+
+    async function interrupt() {
+      controller?.abort();
+      player.pause(); player.currentTime = 0;
+      socket?.close(); socket = null;
+      if (turnId) await fetch(`/v1/turns/${turnId}/interrupt`, { method: 'POST' });
+    }
+
+    function stopCapture() {
+      processor?.disconnect(); source?.disconnect(); context?.close();
+      stream?.getTracks().forEach(track => track.stop());
+      processor = source = context = stream = null;
+    }
+
+    async function ask(text) {
+      if (!text) return false;
+      answer.textContent = '';
+      controller = new AbortController();
+      const response = await fetch('/v1/chat', {
+        method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turn_id: turnId, message: text, history: history.slice(-12) }),
+      });
+      if (!response.ok) throw new Error(`Chat failed: ${await response.text()}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder(); let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n'); buffer = events.pop();
+        for (const event of events) {
+          const data = event.split('\n').find(line => line.startsWith('data: '));
+          if (!data) continue;
+          const payload = JSON.parse(data.slice(6));
+          if (event.startsWith('event: token')) answer.textContent += payload.text;
+        }
+      }
+      if (!answer.textContent || controller.signal.aborted) return false;
+      const speech = await fetch('/v1/speech', {
+        method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turn_id: turnId, text: answer.textContent }),
+      });
+      if (!speech.ok) throw new Error(`Speech failed: ${await speech.text()}`);
+      player.src = URL.createObjectURL(await speech.blob());
+      try { await player.play(); status.textContent = 'Speaking…'; }
+      catch { status.textContent = 'Reply ready — press play.'; }
+      player.onended = () => status.textContent = 'Ready';
+      return true;
+    }
+
+    async function reply(text) {
+      transcript.textContent = text; messageInput.value = text; answer.textContent = '';
+      status.textContent = 'Thinking…';
+      try {
+        if (!await ask(text)) { status.textContent = 'Ready'; return; }
+        history.push({ role: 'user', content: text }, { role: 'assistant', content: answer.textContent });
+        if (history.length > 12) history.splice(0, history.length - 12);
+      } catch (error) {
+        status.textContent = controller?.signal.aborted ? 'Interrupted' : error.message;
+      }
+    }
+
+    async function start() {
+      context = new AudioContext();
+      context.resume();
+      await interrupt();
+      turnId = newTurn(); transcript.textContent = ''; answer.textContent = '';
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (error) { stopCapture(); status.textContent = `Microphone: ${error.message}`; return; }
+      socket = new WebSocket(`${location.origin.replace('http', 'ws')}/v1/live/${turnId}`);
+      source = context.createMediaStreamSource(stream);
+      processor = context.createScriptProcessor(4096, 1, 1);
+      audioFrames = 0;
+      processor.onaudioprocess = event => {
+        const input = event.inputBuffer.getChannelData(0);
+        const pcm = new Int16Array(input.length);
+        input.forEach((sample, index) => pcm[index] = Math.max(-1, Math.min(1, sample)) * 32767);
+        if (++audioFrames % 8 === 0) {
+          const level = Math.sqrt(input.reduce((sum, sample) => sum + sample * sample, 0) / input.length);
+          status.textContent = `Listening… input ${Math.round(level * 100)}%`;
+        }
+        event.outputBuffer.getChannelData(0).fill(0);
+        if (socket.readyState === WebSocket.OPEN) socket.send(pcm.buffer);
+      };
+      source.connect(processor); processor.connect(context.destination);
+      socket.onopen = () => socket.send(JSON.stringify({ type: 'start', sample_rate: context.sampleRate }));
+      socket.onerror = () => status.textContent = 'Microphone connection failed.';
+      socket.onmessage = async ({ data }) => {
+        const message = JSON.parse(data);
+        if (message.type === 'partial') transcript.textContent = message.text;
+        if (message.type === 'error') status.textContent = message.detail;
+        if (message.type === 'final') {
+          if (!message.text) { status.textContent = 'No speech detected — check the selected microphone and try again.'; return; }
+          await reply(message.text);
+        }
+      };
+      button.textContent = 'Stop and ask'; button.id = 'recording'; status.textContent = 'Listening…';
+    }
+
+    function stop() {
+      const stopMessage = JSON.stringify({ type: 'stop' });
+      if (socket?.readyState === WebSocket.OPEN) socket.send(stopMessage);
+      else socket?.addEventListener('open', () => socket.send(stopMessage), { once: true });
+      stopCapture();
+      button.textContent = 'Start speaking'; button.id = 'record'; status.textContent = 'Transcribing…';
+    }
+
+    button.onclick = () => processor ? stop() : start();
+    messageForm.onsubmit = async event => {
+      event.preventDefault();
+      const text = messageInput.value.trim();
+      if (!text) return;
+      await interrupt(); turnId = newTurn(); await reply(text);
+    };
+  </script>
+</html>
