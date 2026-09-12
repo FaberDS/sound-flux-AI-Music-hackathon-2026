@@ -28,20 +28,20 @@ export function useSavedData() {
       getProfile(controller.signal),
       getHistory(controller.signal),
     ]).then(([profileResult, historyResult]) => {
-    if (controller.signal.aborted) return
-    if (profileResult.status === 'fulfilled') setProfile(profileResult.value)
-    if (historyResult.status === 'fulfilled') setHistory(historyResult.value)
-    setErrors({
-      profile:
-        profileResult.status === 'rejected'
-          ? 'Die gespeicherten Angaben konnten nicht geladen werden.'
-          : '',
-      history:
-        historyResult.status === 'rejected'
-          ? 'Der gespeicherte Verlauf konnte nicht geladen werden.'
-          : '',
-    })
-    setLoading(false)
+      if (controller.signal.aborted) return
+      if (profileResult.status === 'fulfilled') setProfile(profileResult.value)
+      if (historyResult.status === 'fulfilled') setHistory(historyResult.value)
+      setErrors({
+        profile:
+          profileResult.status === 'rejected'
+            ? 'Die gespeicherten Angaben konnten nicht geladen werden.'
+            : '',
+        history:
+          historyResult.status === 'rejected'
+            ? 'Der gespeicherte Verlauf konnte nicht geladen werden.'
+            : '',
+      })
+      setLoading(false)
     })
   }, [])
 

@@ -64,9 +64,13 @@ export function useCompanion(
     if (previous) {
       const pending = interruptTurn(previous.id)
       pendingInterrupts.current.add(pending)
-      void pending.finally(() => pendingInterrupts.current.delete(pending)).catch(() => {})
+      void pending
+        .finally(() => pendingInterrupts.current.delete(pending))
+        .catch(() => {})
     }
-    const interrupted = Promise.all([...pendingInterrupts.current]).then(() => {})
+    const interrupted = Promise.all([...pendingInterrupts.current]).then(
+      () => {},
+    )
     void interrupted.catch(() => {})
     clearCapture()
     if (player.current) {

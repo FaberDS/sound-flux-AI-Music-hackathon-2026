@@ -20,7 +20,7 @@ test('offline music, instruments and stop work without the speech API', async ({
 }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.route('**/api/health', (route) => route.fulfill({ status: 503 }))
+  await page.route('**/api/**', (route) => route.fulfill({ status: 503 }))
   await page.goto('/')
   await expect(
     page.getByRole('button', { name: /Sprach-API offline/ }),
@@ -67,7 +67,9 @@ test('saves profile to the API and keeps it when ending a session', async ({
     .getByLabel('Welche Musik mag die Person?')
     .fill('Klavier und Walzer')
   await page.getByRole('button', { name: 'Angaben speichern' }).click()
-  await expect(page.getByText('Angaben gespeichert.', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Angaben gespeichert.', { exact: true }),
+  ).toBeVisible()
   await page.getByRole('button', { name: 'Schließen', exact: true }).click()
   await page.getByLabel('Nachricht an Sound Flux').fill('Ich mag Klavier.')
   await page
@@ -80,7 +82,10 @@ test('saves profile to the API and keeps it when ending a session', async ({
     .click()
   await expect(page.locator('summary')).toContainText('2 Nachrichten')
   expect(requests[0].profile).toEqual([])
-  expect(saved.values).toEqual({ name: 'Anna', music_preferences: 'Klavier und Walzer' })
+  expect(saved.values).toEqual({
+    name: 'Anna',
+    music_preferences: 'Klavier und Walzer',
+  })
   expect(requests[0].history).toEqual([])
   expect(requests[1].history).toHaveLength(2)
   expect(requests[1].turn_id).not.toBe(requests[0].turn_id)
@@ -141,7 +146,9 @@ test('records real browser audio and reuses the turn ID for transcription, chat 
   await expect(
     page.getByRole('button', { name: 'Antwort noch einmal hören' }),
   ).toBeVisible()
-  const voiceIndicator = page.getByRole('img', { name: 'Sound Flux: Ich spreche' })
+  const voiceIndicator = page.getByRole('img', {
+    name: 'Sound Flux: Ich spreche',
+  })
   await expect(voiceIndicator).toBeVisible()
   expect(chatTurn).toBeTruthy()
   expect(form).toContain('name="audio"')
