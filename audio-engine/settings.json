@@ -1,0 +1,12 @@
+{
+  "prompt": "Gentle, uplifting, upbeat and beautiful orchestral instrumental composition with warm piano, soft acoustic guitar and a light rhythm.",
+  "seconds": 60,
+  "strength": 0.8,
+  "steps": 8,
+  "cfg": 2,
+  "seed": 145081676,
+  "repeat": false,
+  "negative_prompt": "incoherence, noise, lo-fi, bad quality, atonal, bad sound, noisy, glitchy, generic, boring, exaggerated, kitsch, corporate",
+  "input_mix": 0.95,
+  "match_input": true
+}

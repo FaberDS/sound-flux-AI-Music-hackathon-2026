@@ -1,0 +1,23 @@
+[project]
+name = "hum-audio-engine"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.141.1",
+    "huggingface-hub==1.30.0",
+    "mlx==0.32.2",
+    "numpy==2.4.6",
+    "python-multipart==0.0.32",
+    "scipy==1.17.1",
+    "sentencepiece==0.2.2",
+    "soundfile==0.14.0",
+    "uvicorn==0.52.4",
+]
+
+[tool.uv]
+exclude-newer = "2026-09-05T00:00:00Z"
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+]
