@@ -8,7 +8,7 @@ Im Root des Repositories:
 ./start.sh
 ```
 
-Aktuell startet das Skript nur das React-Frontend unter [localhost:5173](http://localhost:5173). Node.js ab 22.12 und npm müssen installiert sein. Fehlende Frontend-Abhängigkeiten installiert es mit `npm ci`. Mit `Ctrl+C` beendet es die gestarteten Services samt Kindprozessen.
+Das Skript startet das React-Frontend unter [localhost:5173](http://localhost:5173) und die Sprach-API unter [127.0.0.1:8000](http://127.0.0.1:8000). Node.js ab 22.12, npm und [uv](https://docs.astral.sh/uv/) müssen installiert sein. Fehlende Frontend-Abhängigkeiten installiert es mit `npm ci`; `uv run` synchronisiert die API-Abhängigkeiten aus `uv.lock`. Mit `Ctrl+C` beendet es die gestarteten Services samt Kindprozessen.
 
 Das Skript funktioniert auch bei Aufruf aus einem anderen Arbeitsverzeichnis. Falls Port 5173 belegt ist, bricht der Start ab. Alternativ lässt sich ein anderer Port wählen:
 
@@ -28,6 +28,6 @@ Die Funktion wechselt in den angegebenen Ordner und startet den Befehl parallel 
 
 Nötige Vorbereitungsschritte oberhalb des Service-Abschnitts ergänzen. Abhängigkeiten zwischen Services und deren Bereitschaft muss die jeweilige Integration berücksichtigen.
 
-Die Sprach-API und weitere Teamteile sind noch nicht im Skript eingetragen. Das Frontend erwartet die Sprach-API standardmäßig unter `http://127.0.0.1:8000`; die Adresse kann in `frontend/.env.local` über `API_TARGET` angepasst werden. Instrumente und lokale Melodien funktionieren bereits ohne diese API.
+Das Frontend erwartet die Sprach-API standardmäßig unter `http://127.0.0.1:8000`; die Adresse kann in `frontend/.env.local` über `API_TARGET` angepasst werden. Instrumente und lokale Melodien funktionieren bereits ohne diese API.
 
 Weitere Frontend-Details stehen in [frontend/README.md](frontend/README.md).

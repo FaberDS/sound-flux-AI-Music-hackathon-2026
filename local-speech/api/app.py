@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import random
 import re
 import sqlite3
 import sys
@@ -34,13 +35,36 @@ ONBOARDING_QUESTIONS = (
     ("name", "Name", "Personal", "What should I call you?"),
     ("birth_year", "Birth year", "Personal", "What year were you born?"),
     ("mood", "Mood", "Session", "How are you feeling today?"),
-    ("music_preferences", "Music preferences", "Music", "What music, artists, or instruments do you enjoy?"),
+    ("music_preferences", "Music preferences", "Music", "What music do you enjoy?"),
+    ("played_instrument", "Played an instrument", "Musical ability", "Did you ever play an instrument?"),
+    ("can_whistle", "Can whistle", "Musical ability", "Can you whistle?"),
+    ("childhood_song", "Childhood song", "Music & memories", "Is there a song that reminds you of your childhood?"),
+    ("strong_memory_song", "Strong memory song", "Music & memories", "Is there a song that brings back a particularly strong memory?"),
+)
+ONBOARDING_FLOW_KEYS = (
+    "name", "birth_year", "music_preferences", "played_instrument", "can_whistle",
+    "childhood_song", "strong_memory_song",
 )
 
 SYSTEM_INSTRUCTIONS = """You are Sound Flux, a warm musical companion.
 Use only known preferences and never infer medical facts. Answer the user's actual request first.
 Profile questions are optional: never demand missing details; invite at most one when it fits naturally.
 If interrupted, stop. Answer in one short sentence, at most 18 words."""
+ONBOARDING_FOLLOW_UPS = {
+    "name": (
+        "Thank you. What year were you born?",
+        "Lovely to meet you. Which year were you born?",
+        "Thank you. May I ask what year you were born?",
+    ),
+    "birth_year": "What music do you enjoy?",
+    "music_preferences": "Did you ever play an instrument?",
+    "played_instrument": "Can you whistle?",
+    "can_whistle": "Is there a song that reminds you of your childhood?",
+    "childhood_song": "Is there a song that brings back a particularly strong memory?",
+    "strong_memory_song": "What would you like to remember: a person, a song, or a movie?",
+    "memorable_item": "Anything else would you like to remember?",
+}
+MEMORABLE_ITEM_QUESTION = {"key": "memorable_item", "label": "Memorable item", "category": "Memories", "question": "What would you like to remember: a person, a song, or a movie?"}
 
 
 def synthesize_tts(model, text: str, voice: str) -> bytes:
@@ -84,6 +108,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4_000)
     history: list[Message] = Field(default_factory=list, max_length=12)
     profile: list[str] = Field(default_factory=list, max_length=12)
+    onboarding_key: str | None = Field(default=None, max_length=40)
     model: str = DEFAULT_CHAT_MODEL
 
 
@@ -128,12 +153,30 @@ def initialize_database() -> None:
                 assistant TEXT NOT NULL,
                 duration_ms INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS memorable_items (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS music_preferences (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                value TEXT NOT NULL COLLATE NOCASE UNIQUE
+            );
         """)
         connection.execute(
             """UPDATE profile_properties
                SET value = substr(value, 1, instr(value || ' ', ' ') - 1), updated_at = CURRENT_TIMESTAMP
                WHERE key = 'name' AND instr(trim(value), ' ') > 0"""
         )
+        legacy_preferences = connection.execute(
+            "SELECT value FROM profile_properties WHERE key IN ('music_preferences', 'favorite_genre')"
+        ).fetchall()
+        for row in legacy_preferences:
+            for value in split_music_preferences(row["value"]):
+                connection.execute("INSERT OR IGNORE INTO music_preferences (value) VALUES (?)", (value,))
+        connection.execute("DELETE FROM profile_properties WHERE key IN ('music_preferences', 'favorite_genre')")
 
 
 def save_profile_property(key: str, value: str) -> None:
@@ -153,7 +196,7 @@ def save_profile_property(key: str, value: str) -> None:
 def profile_properties() -> list[dict]:
     categories = {key: category for key, _, category, _ in ONBOARDING_QUESTIONS}
     with database() as connection:
-        return [dict(row) | {"category": categories[row["key"]], "is_profile_property": bool(row["is_profile_property"])} for row in connection.execute(
+        return [dict(row) | {"category": categories.get(row["key"], "Profile"), "is_profile_property": bool(row["is_profile_property"])} for row in connection.execute(
             "SELECT key, label, value, is_profile_property, updated_at FROM profile_properties ORDER BY label"
         )]
 
@@ -178,9 +221,39 @@ def chat_history() -> list[dict]:
         )]
 
 
+def memorable_items() -> list[dict]:
+    with database() as connection:
+        return [dict(row) for row in connection.execute(
+            "SELECT id, created_at, kind, value FROM memorable_items ORDER BY id DESC"
+        )]
+
+
+def split_music_preferences(text: str) -> list[str]:
+    return [value.strip(" .") for value in re.split(r"\s*(?:,|/|\band\b|\bor\b)\s*", text, flags=re.I) if value.strip(" .")]
+
+
+def music_preferences() -> list[dict]:
+    with database() as connection:
+        return [dict(row) for row in connection.execute("SELECT id, created_at, value FROM music_preferences ORDER BY value")]
+
+
+def record_music_preferences(text: str) -> None:
+    with database() as connection:
+        for value in split_music_preferences(text):
+            connection.execute("INSERT OR IGNORE INTO music_preferences (value) VALUES (?)", (value,))
+
+
+def record_memorable_item(text: str) -> None:
+    kind_match = re.search(r"\b(person|song|movie|film)\b", text, re.I)
+    kind = "movie" if kind_match and kind_match.group(1).lower() == "film" else (kind_match.group(1).lower() if kind_match else "other")
+    value = re.sub(r"^\s*(?:a|the)?\s*(?:person|song|movie|film)\s*(?:called|named)?\s*", "", text, flags=re.I).strip() or text.strip()
+    with database() as connection:
+        connection.execute("INSERT INTO memorable_items (kind, value) VALUES (?, ?)", (kind, value))
+
+
 def clear_persisted_data() -> None:
     with database() as connection:
-        connection.executescript("DELETE FROM profile_properties; DELETE FROM interactions; DELETE FROM chat_history;")
+        connection.executescript("DELETE FROM profile_properties; DELETE FROM interactions; DELETE FROM chat_history; DELETE FROM memorable_items; DELETE FROM music_preferences;")
 
 
 def clear_chat_history() -> None:
@@ -191,9 +264,11 @@ def clear_chat_history() -> None:
 def profile_state() -> dict:
     properties = profile_properties()
     values = {item["key"]: item["value"] for item in properties}
+    preferences = music_preferences()
+    question_by_key = {key: (label, category, question) for key, label, category, question in ONBOARDING_QUESTIONS}
     pending = next((
-        {"key": key, "label": label, "category": category, "question": question}
-        for key, label, category, question in ONBOARDING_QUESTIONS if key not in values
+        {"key": key, "label": question_by_key[key][0], "category": question_by_key[key][1], "question": onboarding_question(key, question_by_key[key][2])}
+        for key in ONBOARDING_FLOW_KEYS if (not preferences if key == "music_preferences" else key not in values)
     ), None)
     with database() as connection:
         latest = connection.execute("SELECT created_at FROM interactions ORDER BY id DESC LIMIT 1").fetchone()
@@ -205,7 +280,9 @@ def profile_state() -> dict:
     )
     if values.get("name"):
         greeting = greeting.rstrip(".") + f", {values['name']}."
-    return {"greeting": greeting, "properties": properties, "onboarding": pending}
+    questions = {key: {"key": key, "label": label, "category": category, "question": question} for key, label, category, question in ONBOARDING_QUESTIONS}
+    questions["memorable_item"] = MEMORABLE_ITEM_QUESTION
+    return {"greeting": greeting, "properties": properties, "music_preferences": preferences, "memorable_items": memorable_items(), "onboarding": pending, "questions": questions, "auto_start_onboarding": pending is not None}
 
 
 def apply_profile_updates(text: str) -> None:
@@ -227,7 +304,39 @@ def apply_profile_updates(text: str) -> None:
         re.I,
     )
     if music:
-        save_profile_property("music_preferences", music.group(1).strip())
+        record_music_preferences(music.group(1).strip())
+
+
+def onboarding_question(key: str, fallback: str) -> str:
+    if key == "name":
+        return random.choice((
+            "What should I call you?",
+            "What name would you like me to use?",
+            "How would you like me to address you?",
+        ))
+    return fallback
+
+
+def apply_onboarding_answer(key: str | None, text: str) -> None:
+    answer = text.strip()
+    if is_skip_answer(answer):
+        return
+    if key == "name" and re.fullmatch(r"[A-Za-z][A-Za-z'-]{0,40}[.!]?", answer):
+        save_profile_property("name", answer.rstrip(".!"))
+    if key == "birth_year":
+        year = re.search(r"\b(?:18|19|20)\d{2}\b", answer)
+        if year:
+            save_profile_property("birth_year", year.group())
+    if key == "music_preferences" and answer:
+        record_music_preferences(answer)
+    if key in {"played_instrument", "can_whistle", "childhood_song", "strong_memory_song"} and answer:
+        save_profile_property(key, answer)
+    if key == "memorable_item" and answer:
+        record_memorable_item(answer)
+
+
+def is_skip_answer(text: str) -> bool:
+    return bool(re.search(r"\b(?:skip|done|not now|no thanks|don't know|no preference)\b", text, re.I))
 
 
 initialize_database()
@@ -468,8 +577,23 @@ async def chat(request: ChatRequest):
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
     apply_profile_updates(request.message)
+    apply_onboarding_answer(request.onboarding_key, request.message)
     record_interaction("user", request.message)
+    follow_up = None if request.onboarding_key == "memorable_item" and is_skip_answer(request.message) else ONBOARDING_FOLLOW_UPS.get(request.onboarding_key)
+    if isinstance(follow_up, tuple):
+        follow_up = random.choice(follow_up)
+    if follow_up:
+        async def onboarding_stream():
+            record_interaction("assistant", follow_up)
+            record_chat(request.turn_id, request.message, "onboarding", follow_up, 0)
+            yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': follow_up})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
+            cancel_events.pop(request.turn_id, None)
+
+        return StreamingResponse(onboarding_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     saved_profile = [f"- {item['label']}: {item['value']}" for item in profile_properties()]
+    if preferences := music_preferences():
+        saved_profile.append(f"- Music preferences: {', '.join(item['value'] for item in preferences)}")
     missing = [label for key, label, _, _ in ONBOARDING_QUESTIONS if key not in {item["key"] for item in profile_properties()}]
     profile = "\n".join([*saved_profile, *[f"- {item}" for item in request.profile]]) or "No saved profile items."
     messages = [

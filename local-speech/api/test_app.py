@@ -58,13 +58,48 @@ class InterruptTest(unittest.TestCase):
                 app.initialize_database()
                 self.assertEqual(app.profile_state()["onboarding"]["key"], "name")
                 self.assertEqual(app.profile_state()["onboarding"]["category"], "Personal")
+                self.assertTrue(app.profile_state()["auto_start_onboarding"])
+                app.apply_onboarding_answer("name", "Ada.")
+                self.assertEqual({item["key"]: item["value"] for item in app.profile_state()["properties"]}["name"], "Ada")
+                self.assertEqual(app.profile_state()["onboarding"]["key"], "birth_year")
+                app.apply_onboarding_answer("birth_year", "1922")
+                app.apply_onboarding_answer("music_preferences", "Jazz and blues")
+                values = {item["key"]: item["value"] for item in app.profile_state()["properties"]}
+                self.assertEqual(values["birth_year"], "1922")
+                self.assertEqual([item["value"] for item in app.music_preferences()], ["blues", "Jazz"])
+                app.apply_onboarding_answer("played_instrument", "Piano")
+                self.assertEqual({item["key"]: item["value"] for item in app.profile_state()["properties"]}["played_instrument"], "Piano")
+                app.apply_onboarding_answer("memorable_item", "A movie called Cinema Paradiso")
+                self.assertEqual(app.memorable_items()[0]["kind"], "movie")
+                self.assertEqual(app.memorable_items()[0]["value"], "Cinema Paradiso")
                 app.save_profile_property("name", "Ada")
                 app.apply_profile_updates("I was actually born in 1922.")
                 app.record_interaction("user", "Hello")
                 state = app.profile_state()
-                self.assertEqual(state["onboarding"]["key"], "mood")
+                self.assertEqual(state["onboarding"]["key"], "can_whistle")
                 self.assertEqual({item["key"]: item["value"] for item in state["properties"]}["birth_year"], "1922")
                 self.assertEqual(state["greeting"], "Welcome back after a short break, Ada.")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_name_answer_immediately_streams_birth_year_question(self):
+        import tempfile
+        from pathlib import Path
+
+        async def collect_response():
+            response = await app.chat(app.ChatRequest(turn_id="onboarding-name", message="Ada", onboarding_key="name"))
+            return "".join([chunk async for chunk in response.body_iterator])
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                body = asyncio.run(collect_response())
+                self.assertTrue(any(question in body for question in (
+                    "What year were you born?", "Which year were you born?", "what year you were born?",
+                )))
+                self.assertEqual(app.profile_properties()[0]["value"], "Ada")
             finally:
                 app.DB_PATH = original_path
 
@@ -82,7 +117,7 @@ class InterruptTest(unittest.TestCase):
                 values = {item["key"]: item["value"] for item in app.profile_state()["properties"]}
                 self.assertEqual(values["name"], "Ada")
                 self.assertEqual(values["mood"], "great")
-                self.assertEqual(values["music_preferences"].lower(), "jazz")
+                self.assertEqual([item["value"].lower() for item in app.music_preferences()], ["jazz"])
                 self.assertEqual(app.profile_state()["onboarding"]["key"], "birth_year")
                 app.save_profile_property("name", "Ada Lovelace")
                 self.assertEqual({item["key"]: item["value"] for item in app.profile_state()["properties"]}["name"], "Ada")
@@ -108,6 +143,7 @@ class InterruptTest(unittest.TestCase):
                 app.clear_persisted_data()
                 self.assertEqual(app.profile_properties(), [])
                 self.assertEqual(app.chat_history(), [])
+                self.assertEqual(app.memorable_items(), [])
             finally:
                 app.DB_PATH = original_path
 

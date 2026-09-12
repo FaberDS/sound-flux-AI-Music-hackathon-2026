@@ -32,6 +32,10 @@
     <section>
       <strong>Profile properties</strong>
       <table><thead><tr><th>Category</th><th>Property</th><th>Value</th><th>Updated</th></tr></thead><tbody id="profile-rows"></tbody></table>
+      <strong>Music preferences</strong>
+      <table><thead><tr><th>Preference</th></tr></thead><tbody id="preference-rows"></tbody></table>
+      <strong>Memorable items</strong>
+      <table><thead><tr><th>Kind</th><th>Value</th></tr></thead><tbody id="memory-rows"></tbody></table>
       <strong>Chat history</strong>
       <table><thead><tr><th>Time</th><th>You</th><th>Model</th><th>Companion</th><th>Duration</th></tr></thead><tbody id="history-rows"></tbody></table>
       <button id="clear-history" type="button">Clear chat history</button>
@@ -50,6 +54,8 @@
     const welcome = document.querySelector('#welcome');
     const onboarding = document.querySelector('#onboarding');
     const profileRows = document.querySelector('#profile-rows');
+    const preferenceRows = document.querySelector('#preference-rows');
+    const memoryRows = document.querySelector('#memory-rows');
     const historyRows = document.querySelector('#history-rows');
     const clearData = document.querySelector('#clear-data');
     const clearHistory = document.querySelector('#clear-history');
@@ -59,17 +65,30 @@
     const SILENCE_MS = 1200;
     const SPEECH_THRESHOLD = 0.01;
     let socket, stream, context, source, processor, controller, turnId, audioFrames;
-    let continuous = false, endingTurn = false, speechSeen = false, lastSpeechAt = 0;
+    let continuous = false, endingTurn = false, speechSeen = false, lastSpeechAt = 0, promptedOnboardingKey = null;
 
     const newTurn = () => crypto.randomUUID();
 
     function renderProfile() {
       welcome.textContent = profileState.greeting;
-      onboarding.textContent = profileState.onboarding ? `${profileState.onboarding.category} · Optional profile question: ${profileState.onboarding.question}` : '';
+      const currentQuestion = promptedOnboardingKey ? profileState.questions[promptedOnboardingKey] : profileState.onboarding;
+      onboarding.textContent = currentQuestion ? `${currentQuestion.category} · Optional profile question: ${currentQuestion.question}` : '';
       messageInput.placeholder = 'Say or type a message';
       profileRows.replaceChildren(...profileState.properties.map(property => {
         const row = document.createElement('tr');
         for (const value of [property.category, property.label, property.value, property.updated_at]) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        return row;
+      }));
+      preferenceRows.replaceChildren(...profileState.music_preferences.map(item => {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td'); cell.textContent = item.value; row.append(cell);
+        return row;
+      }));
+      memoryRows.replaceChildren(...profileState.memorable_items.map(item => {
+        const row = document.createElement('tr');
+        for (const value of [item.kind, item.value]) {
           const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
         }
         return row;
@@ -142,13 +161,13 @@
       };
     }
 
-    async function ask(text) {
+    async function ask(text, onboardingKey = null) {
       if (!text) return false;
       answer.textContent = '';
       controller = new AbortController();
       const response = await fetch('/v1/chat', {
         method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turn_id: turnId, message: text, history: history.slice(-12) }),
+        body: JSON.stringify({ turn_id: turnId, message: text, history: history.slice(-12), onboarding_key: onboardingKey }),
       });
       if (!response.ok) throw new Error(`Chat failed: ${await response.text()}`);
       const reader = response.body.getReader();
@@ -174,7 +193,8 @@
       transcript.textContent = text; messageInput.value = text; answer.textContent = '';
       status.textContent = 'Thinking…';
       try {
-        if (!await ask(text)) {
+        const onboardingKey = promptedOnboardingKey; promptedOnboardingKey = null;
+        if (!await ask(text, onboardingKey)) {
           status.textContent = 'Ready';
           if (continuous) setTimeout(() => start(true), 300);
           return;
@@ -182,6 +202,15 @@
         history.push({ role: 'user', content: text }, { role: 'assistant', content: answer.textContent });
         if (history.length > 12) history.splice(0, history.length - 12);
         await Promise.all([refreshProfile(), refreshHistory()]);
+        if (onboardingKey === 'name') promptedOnboardingKey = 'birth_year';
+        if (onboardingKey === 'birth_year') promptedOnboardingKey = 'music_preferences';
+        if (onboardingKey === 'music_preferences') promptedOnboardingKey = 'played_instrument';
+        if (onboardingKey === 'played_instrument') promptedOnboardingKey = 'can_whistle';
+        if (onboardingKey === 'can_whistle') promptedOnboardingKey = 'childhood_song';
+        if (onboardingKey === 'childhood_song') promptedOnboardingKey = 'strong_memory_song';
+        if (onboardingKey === 'strong_memory_song') promptedOnboardingKey = 'memorable_item';
+        if (onboardingKey === 'memorable_item') promptedOnboardingKey = /\b(?:skip|done|not now|no thanks)\b/i.test(text) ? null : 'memorable_item';
+        renderProfile();
       } catch (error) {
         status.textContent = controller?.signal.aborted ? 'Interrupted' : error.message;
         if (continuous) setTimeout(() => start(true), 300);
@@ -191,6 +220,14 @@
     async function start(automatic = false) {
       if (automatic && !continuous) return;
       continuous = true; endingTurn = false; speechSeen = false;
+      if (!automatic && profileState.auto_start_onboarding && profileState.onboarding) {
+        await interrupt(); turnId = newTurn(); controller = new AbortController();
+        promptedOnboardingKey = profileState.onboarding.key;
+        answer.textContent = `Welcome today. ${profileState.onboarding.question}`;
+        status.textContent = 'Companion is starting…';
+        await speak(answer.textContent);
+        return;
+      }
       context = new AudioContext();
       context.resume();
       await interrupt();

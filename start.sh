@@ -56,6 +56,11 @@ if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v uv >/dev/null 2>&1; then
+  printf 'Für die Sprach-API wird uv benötigt.\n' >&2
+  exit 1
+fi
+
 if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 12) ? 0 : 1)'; then
   printf 'Bitte Node.js ab Version 22.12 verwenden. Installiert: %s\n' "$(node --version)" >&2
   exit 1
@@ -74,12 +79,14 @@ fi
 
 # --- Services: Hier ergänzt das Team seine eigenen Startbefehle ---
 start_service "Frontend" "frontend" npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort
+start_service "Sprach-API" "local-speech/api" uv run uvicorn app:app --host 127.0.0.1 --port 8000
 
 # Weitere Services hier ergänzen, zum Beispiel:
 # start_service "Mein Service" "mein-ordner" mein-befehl --mein-argument
 # Vorbereitungen wie die Installation von Abhängigkeiten oberhalb dieses Blocks einfügen.
 
 printf '\nFrontend-Adresse: http://localhost:%s\n' "$FRONTEND_PORT"
+printf 'Sprach-API: http://127.0.0.1:8000\n'
 printf 'Die Vite-Ausgabe bestätigt, sobald der Server bereit ist. Ctrl+C beendet alle gestarteten Services.\n'
 
 # Bash 3.2 hat kein wait -n. Sobald ein Service endet, räumt EXIT auch die übrigen auf.
