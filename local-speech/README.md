@@ -34,11 +34,12 @@ Open <http://127.0.0.1:8000> and allow microphone access.
 
 ## Use it
 
-1. Click **Start speaking**.
+1. Click **Start listening**.
 2. Say a short question or musical idea.
-3. Click **Stop and ask**.
+3. Pause for about one second; the companion transcribes, replies, and listens again.
+4. Click **End session** when you are finished.
 
-The page shows your transcript, streams the companion response, then plays its voice. Starting a new recording immediately stops the previous reply.
+The page shows your transcript, streams the companion response, then plays its voice. Use headphones to prevent its reply from being picked up as a new turn.
 
 You can also type into **Say or type a message**. Typed and spoken turns share the same in-browser conversation history.
 
@@ -49,13 +50,13 @@ The first transcription and speech request download and cache the MLX Whisper an
 | Part | Model |
 | --- | --- |
 | Speech to text | `mlx-community/whisper-large-v3-turbo-asr-fp16` |
-| Chat | `qwen3:14b` via Ollama |
+| Chat | `qwen3.5:2b` via Ollama |
 | Text to speech | `mlx-community/Kokoro-82M-8bit` |
 
 Choose another installed Ollama model when starting the server:
 
 ```sh
-CHAT_MODEL=qwen3.5:27b uv run uvicorn app:app --host 127.0.0.1 --port 8000
+CHAT_MODEL=qwen3:14b uv run uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
 ## If something is missing

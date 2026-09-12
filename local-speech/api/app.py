@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_STT_MODEL = os.getenv("STT_MODEL", "mlx-community/whisper-large-v3-turbo-asr-fp16")
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3:14b")
+DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3.5:2b")
 DEFAULT_TTS_MODEL = os.getenv("TTS_MODEL", "mlx-community/Kokoro-82M-8bit")
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 LIVE_WINDOW_SECONDS = 4

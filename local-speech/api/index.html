@@ -2,7 +2,7 @@
 <html lang="en">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sound Flux Voice Test</title>
+  <title>Sound Flux Voice Companion</title>
   <style>
     body { font: 16px system-ui; max-width: 680px; margin: 3rem auto; padding: 0 1rem; }
     button, input { font: inherit; padding: .65rem 1rem; } #recording { background: #b42318; color: white; }
@@ -10,9 +10,9 @@
     section { margin: 1.5rem 0; } #transcript, #answer { white-space: pre-wrap; min-height: 2em; }
     small { color: #666; }
   </style>
-  <h1>Sound Flux Voice Test</h1>
-  <button id="record">Start speaking</button>
-  <small id="status">Use headphones for interruption testing.</small>
+  <h1>Sound Flux Voice Companion</h1>
+  <button id="record">Start listening</button>
+  <small id="status">Continuous listening. Use headphones to avoid feedback.</small>
   <section><strong>You</strong><div id="transcript"></div></section>
   <section><strong>Companion</strong><div id="answer"></div></section>
   <audio id="reply" controls></audio>
@@ -31,7 +31,10 @@
     const messageForm = document.querySelector('#message-form');
     const messageInput = document.querySelector('#message');
     const history = [];
+    const SILENCE_MS = 1200;
+    const SPEECH_THRESHOLD = 0.01;
     let socket, stream, context, source, processor, controller, turnId, audioFrames;
+    let continuous = false, endingTurn = false, speechSeen = false, lastSpeechAt = 0;
 
     const newTurn = () => crypto.randomUUID();
 
@@ -80,7 +83,10 @@
       player.src = URL.createObjectURL(await speech.blob());
       try { await player.play(); status.textContent = 'Speaking…'; }
       catch { status.textContent = 'Reply ready — press play.'; }
-      player.onended = () => status.textContent = 'Ready';
+      player.onended = () => {
+        status.textContent = 'Ready';
+        if (continuous) start(true);
+      };
       return true;
     }
 
@@ -88,15 +94,22 @@
       transcript.textContent = text; messageInput.value = text; answer.textContent = '';
       status.textContent = 'Thinking…';
       try {
-        if (!await ask(text)) { status.textContent = 'Ready'; return; }
+        if (!await ask(text)) {
+          status.textContent = 'Ready';
+          if (continuous) setTimeout(() => start(true), 300);
+          return;
+        }
         history.push({ role: 'user', content: text }, { role: 'assistant', content: answer.textContent });
         if (history.length > 12) history.splice(0, history.length - 12);
       } catch (error) {
         status.textContent = controller?.signal.aborted ? 'Interrupted' : error.message;
+        if (continuous) setTimeout(() => start(true), 300);
       }
     }
 
-    async function start() {
+    async function start(automatic = false) {
+      if (automatic && !continuous) return;
+      continuous = true; endingTurn = false; speechSeen = false;
       context = new AudioContext();
       context.resume();
       await interrupt();
@@ -114,6 +127,8 @@
         if (++audioFrames % 8 === 0) {
           const level = Math.sqrt(input.reduce((sum, sample) => sum + sample * sample, 0) / input.length);
           status.textContent = `Listening… input ${Math.round(level * 100)}%`;
+          if (level >= SPEECH_THRESHOLD) { speechSeen = true; lastSpeechAt = performance.now(); }
+          if (speechSeen && performance.now() - lastSpeechAt >= SILENCE_MS) finishTurn();
         }
         event.outputBuffer.getChannelData(0).fill(0);
         if (socket.readyState === WebSocket.OPEN) socket.send(pcm.buffer);
@@ -126,22 +141,35 @@
         if (message.type === 'partial') transcript.textContent = message.text;
         if (message.type === 'error') status.textContent = message.detail;
         if (message.type === 'final') {
-          if (!message.text) { status.textContent = 'No speech detected — check the selected microphone and try again.'; return; }
+          if (!message.text) {
+            status.textContent = 'No speech detected — listening again.';
+            if (continuous) setTimeout(() => start(true), 300);
+            return;
+          }
           await reply(message.text);
         }
       };
-      button.textContent = 'Stop and ask'; button.id = 'recording'; status.textContent = 'Listening…';
+      button.textContent = 'End session'; button.id = 'recording'; status.textContent = 'Listening…';
     }
 
-    function stop() {
+    function finishTurn() {
+      if (endingTurn || !processor) return;
+      endingTurn = true;
       const stopMessage = JSON.stringify({ type: 'stop' });
       if (socket?.readyState === WebSocket.OPEN) socket.send(stopMessage);
       else socket?.addEventListener('open', () => socket.send(stopMessage), { once: true });
       stopCapture();
-      button.textContent = 'Start speaking'; button.id = 'record'; status.textContent = 'Transcribing…';
+      status.textContent = 'Transcribing…';
     }
 
-    button.onclick = () => processor ? stop() : start();
+    function endSession() {
+      continuous = false;
+      if (processor) finishTurn();
+      else interrupt();
+      button.textContent = 'Start listening'; button.id = 'record';
+    }
+
+    button.onclick = () => continuous ? endSession() : start();
     messageForm.onsubmit = async event => {
       event.preventDefault();
       const text = messageInput.value.trim();
