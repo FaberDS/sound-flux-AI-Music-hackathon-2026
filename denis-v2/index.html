@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#173f3a" />
+    <title>Memory Music</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header><a href="/" class="brand">MEMORY <span>MUSIC</span></a><span id="device-status" aria-live="polite">Ready when you are</span></header>
+
+      <section id="profile-screen" class="screen">
+        <p class="eyebrow">FOR A CARE PARTNER OR FAMILY MEMBER</p>
+        <h1>Set up a music moment they will recognise.</h1>
+        <p class="lead">Add only what feels helpful. This information stays in this browser session and is never saved.</p>
+        <form id="profile-form" class="card profile-form">
+          <div class="fields">
+            <label>First name <input id="person-name" required placeholder="e.g. Maria" autocomplete="off" /></label>
+            <label>Favourite songs <input id="songs" placeholder="e.g. Sunday morning songs" autocomplete="off" /></label>
+            <label>Favourite artists or genres <input id="music-style" placeholder="e.g. folk, jazz, The Beatles" autocomplete="off" /></label>
+            <label>Instruments they enjoyed <input id="instruments" placeholder="e.g. piano, singing" autocomplete="off" /></label>
+            <label>Birth year or cultural background <input id="background" placeholder="Optional" autocomplete="off" /></label>
+            <label>Musical memory <input id="memory" placeholder="e.g. dancing at our wedding" autocomplete="off" /></label>
+          </div>
+          <button class="button" type="submit">Continue together</button>
+        </form>
+      </section>
+
+      <section id="welcome-screen" class="screen hidden" aria-live="polite">
+        <p class="eyebrow">HELLO</p>
+        <h1 id="welcome-title">Hello.</h1>
+        <p class="lead">Would you like to create something new, or start with music you already love?</p>
+        <div class="choices">
+          <button id="familiar-button" class="choice"><span>♡</span><strong>Begin with familiar music</strong><small id="familiar-copy">A gentle musical companion</small></button>
+          <button id="new-button" class="choice"><span>✦</span><strong>Create something new</strong><small>There is no right or wrong way to play</small></button>
+        </div>
+        <button id="listen-button" class="text-button" type="button">Listen to this question</button>
+      </section>
+
+      <section id="studio-screen" class="screen hidden">
+        <div class="studio-heading">
+          <div><p class="eyebrow" id="session-kind">A MUSIC MOMENT</p><h1 id="session-title">Make a little music.</h1></div>
+          <button id="end-button" class="text-button">End session</button>
+        </div>
+        <p id="memory-line" class="memory-line"></p>
+
+        <div class="studio-grid">
+          <section class="card listen-card">
+            <p class="eyebrow">YOUR VOICE</p>
+            <h2>Hum, sing, or clap.</h2>
+            <p id="voice-copy">Press the button and make any sound you like. We will make a gentle musical answer.</p>
+            <button id="microphone-button" class="round-button" type="button"><span>◎</span> Start listening</button>
+            <p id="voice-status" class="status-text" aria-live="polite">Microphone is off</p>
+            <div class="sound-line"><i id="sound-level"></i></div>
+          </section>
+
+          <section class="card instrument-card">
+            <p class="eyebrow">PLAY TOGETHER</p>
+            <h2>Tap any sound.</h2>
+            <div class="pads">
+              <button class="pad" data-sound="piano"><span>●</span>Piano</button>
+              <button class="pad" data-sound="flute"><span>⌇</span>Flute</button>
+              <button class="pad" data-sound="drum"><span>◒</span>Drum</button>
+              <button class="pad" data-sound="bell"><span>✧</span>Bell</button>
+            </div>
+            <p class="status-text">You can also press <kbd>space</kbd> to make a drum beat.</p>
+          </section>
+        </div>
+
+        <section class="card companion-card">
+          <div><p class="eyebrow">MUSIC TOGETHER</p><strong id="companion-status">A gentle accompaniment is ready.</strong></div>
+          <button id="play-button" class="button" type="button">Play accompaniment</button>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
