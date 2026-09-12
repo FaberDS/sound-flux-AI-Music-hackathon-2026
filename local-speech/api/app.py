@@ -53,7 +53,7 @@ DEBUG_ONBOARDING_VALUES = {
     "played_instrument": "Piano",
     "can_whistle": "Yes",
     "childhood_song": "Moon River",
-    "strong_memory_song": "Here Comes the Sun",
+    "strong_memory_song": "Amazing Grace",
 }
 
 SYSTEM_INSTRUCTIONS = """You are Sound Flux, a warm musical companion.

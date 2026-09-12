@@ -353,6 +353,16 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
 
+  async function clearDebugData() {
+    if (!window.confirm('Alle gespeicherten Profil- und Chat-Daten löschen?')) return
+    try {
+      await saved.erase('all', companion.stop)
+      companion.reset()
+    } catch {
+      setConnection('offline')
+    }
+  }
+
   if (debug) {
     return (
       <main className="debug-page">
@@ -367,6 +377,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
           <button onClick={() => void refreshConnection()}>Aktualisieren</button>
           <button onClick={() => void preseed()} disabled={seeding}>
             {seeding ? 'Wird gefüllt …' : 'Onboarding mit Beispieldaten füllen'}
+          </button>
+          <button onClick={() => void clearDebugData()} disabled={saved.busy}>
+            Alle Daten löschen
           </button>
         </section>
         <section>
