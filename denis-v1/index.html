@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0b12" />
+    <title>Sound Flux</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/">SOUND <span>FLUX</span></a>
+        <span id="connection-status" class="status">● Camera not connected</span>
+      </header>
+
+      <section id="setup-screen" class="screen setup-screen">
+        <div class="intro">
+          <p class="eyebrow">AI MUSIC INTERFACE</p>
+          <h1>Make music your way.</h1>
+          <p>Describe how you want to play. Sound Flux turns your movement into a personal instrument.</p>
+        </div>
+
+        <form id="onboarding-form" class="panel onboarding-panel">
+          <label for="music-request">What would you like to create?</label>
+          <textarea id="music-request" required rows="4" placeholder="Energetic rock. I can use my head. Let nods make drums and let the AI play flute."></textarea>
+          <div class="profile-grid">
+            <label>Favourite artists <input id="artists" placeholder="Optional" /></label>
+            <label>Music experience <input id="experience" placeholder="Optional" /></label>
+            <label>Comfortable movement <input id="movement" value="Head movements" /></label>
+            <label>Mood <input id="mood" placeholder="e.g. dynamic, calm" /></label>
+          </div>
+          <div class="form-actions">
+            <button id="voice-button" type="button" class="button secondary">Use voice</button>
+            <button type="submit" class="button">Create my music kit</button>
+          </div>
+          <p id="voice-status" class="hint" aria-live="polite">Your camera and profile stay on this device.</p>
+        </form>
+
+        <article id="preset-card" class="panel preset-card hidden" aria-live="polite">
+          <p class="eyebrow">YOUR MUSIC KIT</p>
+          <h2 id="preset-name">Rock Motion Kit</h2>
+          <p id="preset-summary">128 BPM · E minor · Flute accompaniment</p>
+          <dl class="mapping-list">
+            <div><dt>Head nod</dt><dd>Kick</dd></div>
+            <div><dt>Tilt left</dt><dd>Snare</dd></div>
+            <div><dt>Tilt right</dt><dd>Crash</dd></div>
+            <div><dt>Movement speed</dt><dd>Drum intensity</dd></div>
+          </dl>
+          <button id="calibrate-button" class="button">Calibrate &amp; play</button>
+        </article>
+      </section>
+
+      <section id="calibration-screen" class="screen calibration-screen hidden">
+        <p class="eyebrow">CALIBRATION</p>
+        <h1>Find your neutral pose.</h1>
+        <p id="calibration-copy">Sit or stand comfortably. When you are ready, hold still for three seconds.</p>
+        <div class="camera-frame"><video id="camera" playsinline muted></video><canvas id="landmarks"></canvas></div>
+        <button id="capture-neutral-button" class="button">Capture neutral pose</button>
+        <button id="keyboard-demo-button" class="button secondary">Start keyboard demo instead</button>
+        <p id="calibration-status" class="hint" aria-live="polite">Camera permission is needed to calibrate.</p>
+      </section>
+
+      <section id="play-screen" class="screen play-screen hidden">
+        <div class="play-heading">
+          <div><p class="eyebrow">NOW PLAYING</p><h1 id="playing-name">Rock Motion Kit</h1></div>
+          <div class="transport"><strong id="tempo-readout">128 BPM</strong><span id="key-readout">E minor</span></div>
+        </div>
+        <div class="play-grid">
+          <div class="camera-frame"><video id="play-camera" playsinline muted></video><canvas id="play-landmarks"></canvas><p id="camera-overlay">Tracking your head</p></div>
+          <aside class="panel controls">
+            <h2>Your movements</h2>
+            <p><kbd>↓</kbd> Nod <span>Kick</span></p>
+            <p><kbd>←</kbd> Tilt left <span>Snare</span></p>
+            <p><kbd>→</kbd> Tilt right <span>Crash</span></p>
+            <label for="sensitivity">Sensitivity <output id="sensitivity-value">Medium</output></label>
+            <input id="sensitivity" type="range" min="1" max="3" value="2" />
+            <button id="midi-button" class="button secondary">Connect MIDI / Chordcat</button>
+            <p id="midi-status" class="hint">No MIDI device connected</p>
+          </aside>
+        </div>
+        <div class="performance-bar panel">
+          <div><span>DRUMS</span><div id="drum-meter" class="meter"><i></i></div></div>
+          <div><span>AI FLUTE</span><div class="wave">~ ~ ~ ~ ~ ~</div></div>
+          <button id="stop-button" class="button danger">Stop</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
