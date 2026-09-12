@@ -82,8 +82,32 @@ class InterruptTest(unittest.TestCase):
                 values = {item["key"]: item["value"] for item in app.profile_state()["properties"]}
                 self.assertEqual(values["name"], "Ada")
                 self.assertEqual(values["mood"], "great")
-                self.assertIn("jazz", values["music_preferences"].lower())
+                self.assertEqual(values["music_preferences"].lower(), "jazz")
                 self.assertEqual(app.profile_state()["onboarding"]["key"], "birth_year")
+                app.save_profile_property("name", "Ada Lovelace")
+                self.assertEqual({item["key"]: item["value"] for item in app.profile_state()["properties"]}["name"], "Ada")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_history_and_clear_data(self):
+        import tempfile
+        from pathlib import Path
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                app.save_profile_property("name", "Ada")
+                app.record_chat("turn-1", "Hello", "qwen3.5:2b", "Hi Ada.", 125)
+                self.assertEqual(app.chat_history()[0]["duration_ms"], 125)
+                self.assertEqual(app.chat_history()[0]["model"], "qwen3.5:2b")
+                app.clear_chat_history()
+                self.assertEqual(app.chat_history(), [])
+                self.assertEqual(app.profile_properties()[0]["value"], "Ada")
+                app.clear_persisted_data()
+                self.assertEqual(app.profile_properties(), [])
+                self.assertEqual(app.chat_history(), [])
             finally:
                 app.DB_PATH = original_path
 

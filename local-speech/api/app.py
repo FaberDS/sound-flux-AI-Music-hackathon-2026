@@ -7,6 +7,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 import uuid
 import wave
 from collections import defaultdict
@@ -118,19 +119,34 @@ def initialize_database() -> None:
                 role TEXT NOT NULL,
                 content TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY,
+                turn_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                user TEXT NOT NULL,
+                model TEXT NOT NULL,
+                assistant TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL
+            );
         """)
+        connection.execute(
+            """UPDATE profile_properties
+               SET value = substr(value, 1, instr(value || ' ', ' ') - 1), updated_at = CURRENT_TIMESTAMP
+               WHERE key = 'name' AND instr(trim(value), ' ') > 0"""
+        )
 
 
 def save_profile_property(key: str, value: str) -> None:
     labels = {question_key: label for question_key, label, _, _ in ONBOARDING_QUESTIONS}
     if key not in labels:
         raise HTTPException(404, "Unknown profile property")
+    value = value.strip().split(maxsplit=1)[0] if key == "name" else value.strip()
     with database() as connection:
         connection.execute(
             """INSERT INTO profile_properties (key, label, value, updated_at)
                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP""",
-            (key, labels[key], value.strip()),
+            (key, labels[key], value),
         )
 
 
@@ -145,6 +161,31 @@ def profile_properties() -> list[dict]:
 def record_interaction(role: str, content: str) -> None:
     with database() as connection:
         connection.execute("INSERT INTO interactions (role, content) VALUES (?, ?)", (role, content))
+
+
+def record_chat(turn_id: str, user: str, model: str, assistant: str, duration_ms: int) -> None:
+    with database() as connection:
+        connection.execute(
+            "INSERT INTO chat_history (turn_id, user, model, assistant, duration_ms) VALUES (?, ?, ?, ?, ?)",
+            (turn_id, user, model, assistant, duration_ms),
+        )
+
+
+def chat_history() -> list[dict]:
+    with database() as connection:
+        return [dict(row) for row in connection.execute(
+            "SELECT turn_id, created_at, user, model, assistant, duration_ms FROM chat_history ORDER BY id DESC"
+        )]
+
+
+def clear_persisted_data() -> None:
+    with database() as connection:
+        connection.executescript("DELETE FROM profile_properties; DELETE FROM interactions; DELETE FROM chat_history;")
+
+
+def clear_chat_history() -> None:
+    with database() as connection:
+        connection.executescript("DELETE FROM interactions; DELETE FROM chat_history;")
 
 
 def profile_state() -> dict:
@@ -179,15 +220,14 @@ def apply_profile_updates(text: str) -> None:
     mood = re.search(r"\b(?:i feel|i am feeling|i'm feeling|my mood is)\s+([^.!?]{1,80})", text, re.I)
     if mood:
         save_profile_property("mood", mood.group(1).strip())
-    music = re.search(
-        r"\b(?:my (?:favorite|favourite) (?:music|artist|song|instrument) is|"
-        r"i (?:like|love|prefer|enjoy) (?:music|jazz|classical|rock|pop|blues|folk|country|metal|electronic|hip[ -]?hop))"
-        r"\s*([^.!?]{0,100})",
+    music = re.search(r"\bmy (?:favorite|favourite) (?:music|artist|song|instrument) is\s+([^.!?]{1,100})", text, re.I)
+    music = music or re.search(
+        r"\bi (?:like|love|prefer|enjoy)\s+(music|jazz|classical|rock|pop|blues|folk|country|metal|electronic|hip[ -]?hop)\b",
         text,
         re.I,
     )
     if music:
-        save_profile_property("music_preferences", music.group().strip())
+        save_profile_property("music_preferences", music.group(1).strip())
 
 
 initialize_database()
@@ -294,6 +334,23 @@ async def get_profile():
 async def update_profile(key: str, update: ProfileUpdate):
     save_profile_property(key, update.value)
     record_interaction("user", f"{key}: {update.value.strip()}")
+    return profile_state()
+
+
+@app.get("/v1/history")
+async def get_history():
+    return {"items": chat_history()}
+
+
+@app.delete("/v1/history")
+async def clear_history():
+    clear_chat_history()
+    return {"items": []}
+
+
+@app.delete("/v1/data")
+async def clear_data():
+    clear_persisted_data()
     return profile_state()
 
 
@@ -420,6 +477,7 @@ async def chat(request: ChatRequest):
         *[message.model_dump() for message in request.history],
         {"role": "user", "content": request.message},
     ]
+    started_at = time.perf_counter()
 
     async def stream():
         active_chat_tasks[request.turn_id] = asyncio.current_task()
@@ -446,7 +504,9 @@ async def chat(request: ChatRequest):
                             answer.append(token)
                             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': token})}\n\n"
                     if answer and not event.is_set():
-                        record_interaction("assistant", "".join(answer))
+                        assistant = "".join(answer)
+                        record_interaction("assistant", assistant)
+                        record_chat(request.turn_id, request.message, request.model, assistant, round((time.perf_counter() - started_at) * 1000))
                     yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
         except asyncio.CancelledError:
             return

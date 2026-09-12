@@ -4,13 +4,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sound Flux Voice Companion</title>
   <style>
-    body { font: 16px system-ui; max-width: 680px; margin: 3rem auto; padding: 0 1rem; }
+    body { font: 16px system-ui; max-width: 1100px; margin: 3rem auto; padding: 0 1rem; }
     button, input { font: inherit; padding: .65rem 1rem; } #recording { background: #b42318; color: white; }
     form { display: flex; gap: .5rem; } input { flex: 1; min-width: 0; }
     section { margin: 1.5rem 0; } #transcript, #answer { white-space: pre-wrap; min-height: 2em; }
     small { color: #666; }
     #welcome, #onboarding { margin: 1rem 0; } #onboarding { color: #555; }
     table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }
+    details { margin: 1.5rem 0; } summary { cursor: pointer; font-weight: 600; } #clear-data, #clear-history { margin-top: 1rem; }
   </style>
   <h1>Sound Flux Voice Companion</h1>
   <button id="record">Start listening</button>
@@ -26,10 +27,17 @@
       <button>Ask companion</button>
     </form>
   </section>
-  <section>
-    <strong>Profile properties</strong>
-    <table><thead><tr><th>Category</th><th>Property</th><th>Value</th><th>Updated</th></tr></thead><tbody id="profile-rows"></tbody></table>
-  </section>
+  <details>
+    <summary>Debug data</summary>
+    <section>
+      <strong>Profile properties</strong>
+      <table><thead><tr><th>Category</th><th>Property</th><th>Value</th><th>Updated</th></tr></thead><tbody id="profile-rows"></tbody></table>
+      <strong>Chat history</strong>
+      <table><thead><tr><th>Time</th><th>You</th><th>Model</th><th>Companion</th><th>Duration</th></tr></thead><tbody id="history-rows"></tbody></table>
+      <button id="clear-history" type="button">Clear chat history</button>
+      <button id="clear-data" type="button">Clear all saved data</button>
+    </section>
+  </details>
   <script id="initial-state" type="application/json">__INITIAL_STATE__</script>
   <script>
     const button = document.querySelector('#record');
@@ -42,7 +50,11 @@
     const welcome = document.querySelector('#welcome');
     const onboarding = document.querySelector('#onboarding');
     const profileRows = document.querySelector('#profile-rows');
+    const historyRows = document.querySelector('#history-rows');
+    const clearData = document.querySelector('#clear-data');
+    const clearHistory = document.querySelector('#clear-history');
     let profileState = JSON.parse(document.querySelector('#initial-state').textContent);
+    let savedHistory = [];
     const history = [];
     const SILENCE_MS = 1200;
     const SPEECH_THRESHOLD = 0.01;
@@ -68,6 +80,39 @@
       profileState = await fetch('/v1/profile').then(response => response.json());
       renderProfile();
     }
+
+    function renderHistory() {
+      historyRows.replaceChildren(...savedHistory.map(item => {
+        const row = document.createElement('tr');
+        for (const value of [item.created_at.slice(11, 16), item.user, item.model, item.assistant, `${item.duration_ms} ms`]) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        return row;
+      }));
+    }
+
+    async function refreshHistory() {
+      savedHistory = (await fetch('/v1/history').then(response => response.json())).items;
+      renderHistory();
+    }
+
+    clearData.onclick = async () => {
+      if (!confirm('Clear all saved profile and chat data?')) return;
+      const response = await fetch('/v1/data', { method: 'DELETE' });
+      if (!response.ok) { status.textContent = 'Could not clear saved data.'; return; }
+      profileState = await response.json();
+      history.length = 0; savedHistory = []; transcript.textContent = ''; answer.textContent = '';
+      player.pause(); player.removeAttribute('src'); player.load();
+      renderProfile(); renderHistory(); status.textContent = 'Saved data cleared.';
+    };
+
+    clearHistory.onclick = async () => {
+      if (!confirm('Clear chat history but keep profile properties?')) return;
+      const response = await fetch('/v1/history', { method: 'DELETE' });
+      if (!response.ok) { status.textContent = 'Could not clear chat history.'; return; }
+      history.length = 0; savedHistory = []; renderHistory(); await refreshProfile();
+      status.textContent = 'Chat history cleared.';
+    };
 
     async function interrupt() {
       controller?.abort();
@@ -136,7 +181,7 @@
         }
         history.push({ role: 'user', content: text }, { role: 'assistant', content: answer.textContent });
         if (history.length > 12) history.splice(0, history.length - 12);
-        await refreshProfile();
+        await Promise.all([refreshProfile(), refreshHistory()]);
       } catch (error) {
         status.textContent = controller?.signal.aborted ? 'Interrupted' : error.message;
         if (continuous) setTimeout(() => start(true), 300);
@@ -207,6 +252,7 @@
 
     button.onclick = () => continuous ? endSession() : start();
     renderProfile();
+    refreshHistory();
     messageForm.onsubmit = async event => {
       event.preventDefault();
       const text = messageInput.value.trim();
