@@ -5,6 +5,13 @@ export interface Message {
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
+export function liveSocketUrl(turnId: string) {
+  const url = new URL(baseUrl || '/', location.origin)
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/live/${encodeURIComponent(turnId)}`
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 export async function request(
   path: string,
   options: RequestInit = {},
@@ -35,31 +42,12 @@ export async function checkConnection(signal: AbortSignal) {
     throw new Error('Unexpected health response')
 }
 
-export async function transcribe(
-  blob: Blob,
-  turnId: string,
-  signal: AbortSignal,
-) {
-  const form = new FormData()
-  const extension = blob.type.includes('mp4')
-    ? 'mp4'
-    : blob.type.includes('ogg')
-      ? 'ogg'
-      : 'webm'
-  form.append('audio', blob, `aufnahme.${extension}`)
-  form.append('turn_id', turnId)
-  const response = await request('/v1/transcriptions', {
+export async function preseedOnboarding(signal: AbortSignal) {
+  const response = await request('/v1/debug/preseed-onboarding', {
     method: 'POST',
-    body: form,
     signal,
-  })
-  const data = await response.json()
-  if (typeof data.text !== 'string' || !data.text.trim()) {
-    throw new Error(
-      'Ich konnte keine Worte hören. Sprich noch einmal oder schreibe deine Nachricht.',
-    )
-  }
-  return data.text.trim().slice(0, 4_000) as string
+  }, 10_000)
+  return response.json()
 }
 
 export async function streamReply(
@@ -69,6 +57,7 @@ export async function streamReply(
   profile: string[],
   signal: AbortSignal,
   onToken: (text: string) => void,
+  onboardingKey?: string | null,
 ) {
   const response = await request('/v1/chat', {
     method: 'POST',
@@ -79,6 +68,7 @@ export async function streamReply(
       message,
       history: history.slice(-12),
       profile,
+      onboarding_key: onboardingKey,
     }),
   })
   if (!response.body)

@@ -18,13 +18,14 @@ from typing import Annotated, Literal
 
 import httpx
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from mlx_audio.tts.utils import load_model
 from pydantic import BaseModel, Field
 
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
+MUSICBRAINZ_URL = "https://musicbrainz.org/ws/2/recording"
 DEFAULT_STT_MODEL = os.getenv("STT_MODEL", "mlx-community/whisper-large-v3-turbo-asr-fp16")
 DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3.5:2b")
 DEFAULT_TTS_MODEL = os.getenv("TTS_MODEL", "mlx-community/Kokoro-82M-8bit")
@@ -45,6 +46,15 @@ ONBOARDING_FLOW_KEYS = (
     "name", "birth_year", "music_preferences", "played_instrument", "can_whistle",
     "childhood_song", "strong_memory_song",
 )
+DEBUG_ONBOARDING_VALUES = {
+    "name": "Alex",
+    "birth_year": "1950",
+    "mood": "calm",
+    "played_instrument": "Piano",
+    "can_whistle": "Yes",
+    "childhood_song": "Moon River",
+    "strong_memory_song": "Here Comes the Sun",
+}
 
 SYSTEM_INSTRUCTIONS = """You are Sound Flux, a warm musical companion.
 Use only known preferences and never infer medical facts. Answer the user's actual request first.
@@ -96,6 +106,9 @@ cancel_events: dict[str, asyncio.Event] = {}
 active_processes: defaultdict[str, set[asyncio.subprocess.Process]] = defaultdict(set)
 active_chat_tasks: dict[str, asyncio.Task] = {}
 tts_lock = asyncio.Lock()
+# ponytail: global request lock; per-user throttling if this becomes multi-user.
+musicbrainz_lock = asyncio.Lock()
+musicbrainz_last_request = 0.0
 
 
 class Message(BaseModel):
@@ -243,6 +256,50 @@ def record_music_preferences(text: str) -> None:
             connection.execute("INSERT OR IGNORE INTO music_preferences (value) VALUES (?)", (value,))
 
 
+def musicbrainz_results(payload: dict) -> list[dict]:
+    results, seen = [], set()
+    for recording in payload.get("recordings", []):
+        title = recording.get("title", "").strip()
+        artist = "".join(f"{credit.get('name', '')}{credit.get('joinphrase', '')}" for credit in recording.get("artist-credit", [])).strip()
+        if not title or not artist or (title.casefold(), artist.casefold()) in seen:
+            continue
+        seen.add((title.casefold(), artist.casefold()))
+        results.append({"title": title, "artist": artist})
+        if len(results) == 3:
+            break
+    return results
+
+
+async def search_musicbrainz(query: str) -> list[dict]:
+    global musicbrainz_last_request
+    async with musicbrainz_lock:
+        wait = 1 - (time.monotonic() - musicbrainz_last_request)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(
+                    MUSICBRAINZ_URL,
+                    params={"query": query, "fmt": "json", "limit": 8},
+                    headers={"User-Agent": "SoundFlux-local/0.1", "Accept": "application/json"},
+                )
+                response.raise_for_status()
+                return musicbrainz_results(response.json())
+        except httpx.HTTPError:
+            return []
+        finally:
+            musicbrainz_last_request = time.monotonic()
+
+
+def is_song_request(text: str) -> bool:
+    return bool(re.search(r"\b(?:recommend|suggest|find|play|looking for|what song|which song)\b", text, re.I))
+
+
+def music_search_query(text: str) -> str:
+    genre = re.search(r"\b(jazz|rock|pop|blues|folk|country|metal|electronic|classical|hip[ -]?hop)\b", text, re.I)
+    return genre.group() if genre else text
+
+
 def record_memorable_item(text: str) -> None:
     kind_match = re.search(r"\b(person|song|movie|film)\b", text, re.I)
     kind = "movie" if kind_match and kind_match.group(1).lower() == "film" else (kind_match.group(1).lower() if kind_match else "other")
@@ -259,6 +316,13 @@ def clear_persisted_data() -> None:
 def clear_chat_history() -> None:
     with database() as connection:
         connection.executescript("DELETE FROM interactions; DELETE FROM chat_history;")
+
+
+def preseed_onboarding() -> dict:
+    for key, value in DEBUG_ONBOARDING_VALUES.items():
+        save_profile_property(key, value)
+    record_music_preferences("Jazz, Classical")
+    return profile_state()
 
 
 def profile_state() -> dict:
@@ -321,8 +385,10 @@ def apply_onboarding_answer(key: str | None, text: str) -> None:
     answer = text.strip()
     if is_skip_answer(answer):
         return
-    if key == "name" and re.fullmatch(r"[A-Za-z][A-Za-z'-]{0,40}[.!]?", answer):
-        save_profile_property("name", answer.rstrip(".!"))
+    if key == "name" and not re.search(r"\b(?:my name is|call me)\b", answer, re.I):
+        name = re.match(r"[A-Za-z][A-Za-z'-]{0,40}", answer)
+        if name and name.group().lower() not in {"hello", "hi", "hey"}:
+            save_profile_property("name", name.group())
     if key == "birth_year":
         year = re.search(r"\b(?:18|19|20)\d{2}\b", answer)
         if year:
@@ -446,9 +512,19 @@ async def update_profile(key: str, update: ProfileUpdate):
     return profile_state()
 
 
+@app.post("/v1/debug/preseed-onboarding")
+async def preseed_debug_onboarding():
+    return preseed_onboarding()
+
+
 @app.get("/v1/history")
 async def get_history():
     return {"items": chat_history()}
+
+
+@app.get("/v1/music/search")
+async def search_music(query: Annotated[str, Query(min_length=1, max_length=120)]):
+    return {"items": await search_musicbrainz(query)}
 
 
 @app.delete("/v1/history")
@@ -591,13 +667,15 @@ async def chat(request: ChatRequest):
             cancel_events.pop(request.turn_id, None)
 
         return StreamingResponse(onboarding_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    songs = await search_musicbrainz(music_search_query(request.message)) if is_song_request(request.message) else []
     saved_profile = [f"- {item['label']}: {item['value']}" for item in profile_properties()]
     if preferences := music_preferences():
         saved_profile.append(f"- Music preferences: {', '.join(item['value'] for item in preferences)}")
     missing = [label for key, label, _, _ in ONBOARDING_QUESTIONS if key not in {item["key"] for item in profile_properties()}]
     profile = "\n".join([*saved_profile, *[f"- {item}" for item in request.profile]]) or "No saved profile items."
+    song_context = "\n".join(f'- "{song["title"]}" — {song["artist"]}' for song in songs)
     messages = [
-        {"role": "system", "content": f"{SYSTEM_INSTRUCTIONS}\n\nProfile:\n{profile}\n\nOptional missing profile fields: {', '.join(missing) or 'none'}"},
+        {"role": "system", "content": f"{SYSTEM_INSTRUCTIONS}\n\nProfile:\n{profile}\n\nOptional missing profile fields: {', '.join(missing) or 'none'}\n\nMusicBrainz matches:\n{song_context or 'None'}\nWhen matches are available, suggest up to three and name the credited artist for every song."},
         *[message.model_dump() for message in request.history],
         {"role": "user", "content": request.message},
     ]

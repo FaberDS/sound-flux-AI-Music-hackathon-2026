@@ -45,7 +45,7 @@ export interface ProfileState {
   greeting: string
   properties: ProfileProperty[]
   onboarding: {
-    key: ProfileKey
+    key: string
     label: string
     category: string
     question: string
@@ -90,12 +90,14 @@ export function welcomeText(profile: ProfileState | null) {
 
 export function onboardingQuestion(profile: ProfileState | null) {
   if (!profile?.onboarding) return null
-  return {
+  return (
+    {
     name: 'Wie darf ich dich nennen?',
     birth_year: 'Magst du mir dein Geburtsjahr verraten?',
     mood: 'Wie geht es dir heute?',
     music_preferences: 'Welche Musik hörst du gerne?',
-  }[profile.onboarding.key]
+    }[profile.onboarding.key] ?? profile.onboarding.question
+  )
 }
 
 export async function getProfile(signal: AbortSignal): Promise<ProfileState> {

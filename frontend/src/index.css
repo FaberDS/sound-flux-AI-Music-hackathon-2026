@@ -74,6 +74,41 @@
 }
 
 @layer components {
+  .debug-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 20px;
+    color: var(--color-ink);
+  }
+  .debug-page header,
+  .debug-page section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .debug-page section {
+    display: block;
+  }
+  .debug-page h1, .debug-page h2, .debug-page p { margin: 0; }
+  .debug-page h1 { font-size: 36px; }
+  .debug-page h2 { font-size: 20px; margin-bottom: 10px; }
+  .debug-page header > div > p { color: var(--color-muted); font-size: 13px; }
+  .debug-page button, .debug-page a {
+    display: inline-block;
+    margin-top: 12px;
+    border: 1px solid var(--color-brown);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--color-brown);
+    text-decoration: none;
+  }
+  .debug-page table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .debug-page th, .debug-page td { padding: 9px; border-bottom: 1px solid var(--color-line); text-align: left; vertical-align: top; }
+  .debug-status { font-weight: 700; }
+  .debug-status.online { color: #496b3b; }
+  .debug-status.offline { color: #a33c22; }
   .app-shell {
     max-width: 1600px;
     margin: auto;
@@ -295,6 +330,27 @@
     padding: 21px 25px 17px;
     box-shadow: 0 8px 24px #70432f04;
   }
+  .companion-card.session-active {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    align-content: center;
+    grid-template-columns: minmax(0, 680px);
+    justify-content: center;
+    gap: 18px;
+    border-radius: 0;
+    padding: clamp(24px, 6vw, 72px);
+    overflow: auto;
+  }
+  .session-active > :first-child,
+  .session-active .voice-controls,
+  .session-active .replay-button,
+  .session-active .companion-footnote,
+  .session-active > .error-message {
+    width: min(100%, 680px);
+    justify-self: center;
+  }
   .card-eyebrow {
     color: var(--color-brown);
     font-size: 10px;
@@ -491,52 +547,6 @@
   .microphone-button.recording {
     background: var(--color-brown);
     color: white;
-  }
-  .voice-stop {
-    width: 51px;
-    display: grid;
-    place-items: center;
-    border: 1px solid #c7bba7;
-    border-radius: 7px;
-    color: var(--color-brown);
-  }
-  .message-form {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 12px;
-    border: 1px solid #ded6c9;
-    background: var(--color-paper);
-    border-radius: 7px;
-    padding-left: 13px;
-    color: #a2998c;
-    min-width: 0;
-  }
-  .message-form > svg {
-    flex-shrink: 0;
-  }
-  .message-form input {
-    width: 100%;
-    min-width: 0;
-    height: 49px;
-    font-size: 13px;
-    color: var(--color-ink);
-    outline: none;
-  }
-  .message-form:focus-within {
-    outline: 2px solid var(--color-brown);
-    outline-offset: 3px;
-  }
-  .message-form input::placeholder {
-    color: #8a8176;
-  }
-  .message-form button {
-    color: var(--color-brown);
-    width: 45px;
-    height: 45px;
-    flex-shrink: 0;
-    display: grid;
-    place-items: center;
   }
   .companion-footnote {
     display: flex;
@@ -1100,7 +1110,6 @@
   }
   .companion-message,
   .voice-controls,
-  .message-form,
   .companion-card > .error-message,
   .replay-button {
     grid-column: 2;
@@ -1260,9 +1269,6 @@
     min-height: 54px;
     font-size: 13px;
   }
-  .message-form input {
-    font-size: 13px;
-  }
   .companion-footnote {
     font-size: 10px;
   }
@@ -1385,30 +1391,6 @@
   .onboarding-offer button:last-child {
     color: var(--color-muted);
     text-decoration: none;
-  }
-  .hands-free-option {
-    grid-column: 2;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 8px;
-    min-height: 44px;
-    font-size: 11px;
-    color: var(--color-muted);
-    cursor: pointer;
-  }
-  .hands-free-option input {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--color-brown);
-  }
-  .hands-free-help {
-    grid-column: 2;
-    text-align: center;
-    font-size: 11px;
-    line-height: 1.6;
-    color: var(--color-muted);
-    margin: -3px 0 8px;
   }
   .profile-fields {
     display: grid;

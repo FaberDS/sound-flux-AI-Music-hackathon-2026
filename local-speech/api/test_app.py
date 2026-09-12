@@ -59,7 +59,7 @@ class InterruptTest(unittest.TestCase):
                 self.assertEqual(app.profile_state()["onboarding"]["key"], "name")
                 self.assertEqual(app.profile_state()["onboarding"]["category"], "Personal")
                 self.assertTrue(app.profile_state()["auto_start_onboarding"])
-                app.apply_onboarding_answer("name", "Ada.")
+                app.apply_onboarding_answer("name", "Ada speaking.")
                 self.assertEqual({item["key"]: item["value"] for item in app.profile_state()["properties"]}["name"], "Ada")
                 self.assertEqual(app.profile_state()["onboarding"]["key"], "birth_year")
                 app.apply_onboarding_answer("birth_year", "1922")
@@ -79,6 +79,28 @@ class InterruptTest(unittest.TestCase):
                 self.assertEqual(state["onboarding"]["key"], "can_whistle")
                 self.assertEqual({item["key"]: item["value"] for item in state["properties"]}["birth_year"], "1922")
                 self.assertEqual(state["greeting"], "Welcome back after a short break, Ada.")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_preseed_onboarding_completes_the_flow(self):
+        import tempfile
+        from pathlib import Path
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                state = app.preseed_onboarding()
+                self.assertIsNone(state["onboarding"])
+                self.assertEqual(
+                    {item["key"]: item["value"] for item in state["properties"]}["name"],
+                    "Alex",
+                )
+                self.assertEqual(
+                    [item["value"] for item in state["music_preferences"]],
+                    ["Classical", "Jazz"],
+                )
             finally:
                 app.DB_PATH = original_path
 
@@ -146,6 +168,17 @@ class InterruptTest(unittest.TestCase):
                 self.assertEqual(app.memorable_items(), [])
             finally:
                 app.DB_PATH = original_path
+
+    def test_musicbrainz_results_include_artist_names(self):
+        results = app.musicbrainz_results({"recordings": [
+            {"title": "Song A", "artist-credit": [{"name": "Artist One"}]},
+            {"title": "Song A", "artist-credit": [{"name": "Artist One"}]},
+            {"title": "Song B", "artist-credit": [{"name": "Artist Two", "joinphrase": " & "}, {"name": "Artist Three"}]},
+        ]})
+        self.assertEqual(results, [
+            {"title": "Song A", "artist": "Artist One"},
+            {"title": "Song B", "artist": "Artist Two & Artist Three"},
+        ])
 
     def test_index_embeds_profile_state(self):
         response = asyncio.run(app.index())

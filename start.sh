@@ -78,8 +78,16 @@ if [ ! -x "$PROJECT_ROOT/frontend/node_modules/.bin/vite" ]; then
 fi
 
 # --- Services: Hier ergänzt das Team seine eigenen Startbefehle ---
-start_service "Frontend" "frontend" npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort
-start_service "Sprach-API" "local-speech/api" uv run uvicorn app:app --host 127.0.0.1 --port 8000
+if curl --fail --silent --max-time 1 "http://127.0.0.1:$FRONTEND_PORT" >/dev/null; then
+  printf '\n[Frontend] Nutze das bereits laufende Frontend auf Port %s\n' "$FRONTEND_PORT"
+else
+  start_service "Frontend" "frontend" npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort
+fi
+if curl --fail --silent --max-time 1 http://127.0.0.1:8000/health >/dev/null; then
+  printf '\n[Sprach-API] Nutze die bereits laufende API auf Port 8000\n'
+else
+  start_service "Sprach-API" "local-speech/api" uv run uvicorn app:app --host 127.0.0.1 --port 8000
+fi
 
 # Weitere Services hier ergänzen, zum Beispiel:
 # start_service "Mein Service" "mein-ordner" mein-befehl --mein-argument

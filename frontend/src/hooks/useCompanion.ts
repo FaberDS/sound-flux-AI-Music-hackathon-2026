@@ -2,11 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createSpeech,
   interruptTurn,
+  liveSocketUrl,
   streamReply,
-  transcribe,
 } from '../lib/api'
-import { chatContext, mergeTurns, type SavedTurn } from '../lib/savedData'
-import { SpeechPauseDetector } from '../lib/speechPause'
+import {
+  chatContext,
+  mergeTurns,
+  type ProfileState,
+  type SavedTurn,
+} from '../lib/savedData'
 
 export type Phase =
   'idle' | 'permission' | 'recording' | 'transcribing' | 'thinking' | 'speaking'
@@ -20,38 +24,48 @@ export function useCompanion(
   readAloud: boolean,
   volume: number,
   onTurnFinished: () => void,
+  onboarding: ProfileState['onboarding'],
 ) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [transcript, setTranscript] = useState('')
   const [answer, setAnswer] = useState('')
   const [error, setError] = useState('')
-  const [seconds, setSeconds] = useState(0)
   const [canReplay, setCanReplay] = useState(false)
   const [turns, setTurns] = useState<SavedTurn[]>([])
   const turnsRef = useRef<SavedTurn[]>([])
   const [continuous, setContinuous] = useState(false)
   const continuousRef = useRef(false)
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pauseDetector = useRef<SpeechPauseDetector | null>(null)
   const active = useRef<Turn | null>(null)
   const pendingInterrupts = useRef(new Set<Promise<void>>())
-  const recorder = useRef<MediaRecorder | null>(null)
   const media = useRef<MediaStream | null>(null)
+  const socket = useRef<WebSocket | null>(null)
+  const context = useRef<AudioContext | null>(null)
+  const source = useRef<MediaStreamAudioSourceNode | null>(null)
+  const processor = useRef<ScriptProcessorNode | null>(null)
+  const finishLive = useRef<(() => void) | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   const player = useRef<HTMLAudioElement | null>(null)
   const audioUrl = useRef<string | null>(null)
   const playbackGeneration = useRef(0)
-  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished })
+  const pendingOnboardingKey = useRef<string | null>(null)
+  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished, onboarding })
 
-  const clearCapture = useCallback(() => {
-    pauseDetector.current?.stop()
-    pauseDetector.current = null
+  const clearCapture = useCallback((closeSocket = true) => {
     if (timer.current) clearInterval(timer.current)
     timer.current = null
-    if (recorder.current?.state === 'recording') recorder.current.stop()
-    recorder.current = null
+    finishLive.current = null
+    processor.current?.disconnect()
+    processor.current = null
+    source.current?.disconnect()
+    source.current = null
+    if (context.current?.state !== 'closed')
+      void context.current?.close().catch(() => {})
+    context.current = null
     media.current?.getTracks().forEach((track) => track.stop())
     media.current = null
+    if (closeSocket) socket.current?.close()
+    if (closeSocket) socket.current = null
   }, [])
 
   const cancel = useCallback(() => {
@@ -100,9 +114,9 @@ export function useCompanion(
   )
 
   useEffect(() => {
-    settings.current = { readAloud, volume, savedHistory, onTurnFinished }
+    settings.current = { readAloud, volume, savedHistory, onTurnFinished, onboarding }
     if (player.current) player.current.volume = volume
-  }, [readAloud, volume, savedHistory, onTurnFinished])
+  }, [readAloud, volume, savedHistory, onTurnFinished, onboarding])
   useEffect(() => {
     if (!readAloud) {
       player.current?.pause()
@@ -156,6 +170,8 @@ export function useCompanion(
     setPhase('thinking')
     const startedAt = performance.now()
     try {
+      const onboardingKey = pendingOnboardingKey.current
+      pendingOnboardingKey.current = null
       const response = await streamReply(
         turn.id,
         text,
@@ -167,6 +183,7 @@ export function useCompanion(
         (partial) => {
           if (isCurrent(turn)) setAnswer(partial)
         },
+        onboardingKey,
       )
       if (!isCurrent(turn)) return
       turnsRef.current = [
@@ -233,30 +250,21 @@ export function useCompanion(
     }
   }
 
-  async function send(text: string) {
-    if (!text.trim()) return
-    continuousRef.current = false
-    setContinuous(false)
-    const turn = beginTurn()
-    await respond(text.trim().slice(0, 4_000), turn)
-  }
-
-  async function startRecording(automatic = false) {
+  async function startRecording(automatic = false, existingTurn?: Turn) {
     if (automatic && !continuousRef.current) return
     if (!automatic) {
       continuousRef.current = false
       setContinuous(false)
     }
-    const turn = beginTurn()
+    const turn = existingTurn ?? beginTurn()
     setPhase('permission')
-    setSeconds(0)
     if (
       !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === 'undefined'
+      typeof AudioContext === 'undefined'
     ) {
       fail(
         new Error(
-          'Dieser Browser kann hier nicht aufnehmen. Öffne die Seite über localhost oder HTTPS, oder schreibe deine Nachricht.',
+          'Dieser Browser kann hier nicht aufnehmen. Öffne die Seite über localhost oder HTTPS.',
         ),
         turn,
       )
@@ -271,74 +279,86 @@ export function useCompanion(
         return
       }
       media.current = stream
-      const mimeType = [
-        'audio/webm;codecs=opus',
-        'audio/mp4',
-        'audio/ogg;codecs=opus',
-      ].find((type) => MediaRecorder.isTypeSupported(type))
-      const capture = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined,
-      )
-      recorder.current = capture
-      const chunks: Blob[] = []
-      let bytes = 0
-      capture.ondataavailable = ({ data }) => {
-        if (data.size) {
-          chunks.push(data)
-          bytes += data.size
-        }
-        if (bytes >= 24 * 1024 * 1024 && capture.state === 'recording')
-          capture.stop()
-      }
-      capture.onerror = () =>
-        fail(
-          new Error(
-            'Die Aufnahme wurde unterbrochen. Bitte versuche es noch einmal oder schreibe deine Nachricht.',
-          ),
-          turn,
-        )
-      capture.onstop = async () => {
-        if (!isCurrent(turn)) return
-        clearCapture()
+      const audioContext = new AudioContext()
+      context.current = audioContext
+      await audioContext.resume()
+      const audioSource = audioContext.createMediaStreamSource(stream)
+      const audioProcessor = audioContext.createScriptProcessor(4096, 1, 1)
+      source.current = audioSource
+      processor.current = audioProcessor
+      const live = new WebSocket(liveSocketUrl(turn.id))
+      socket.current = live
+      let audioFrames = 0
+      let heardSpeech = false
+      let lastSpeechAt = performance.now()
+      const finish = () => {
+        if (!isCurrent(turn) || !finishLive.current) return
+        finishLive.current = null
         setPhase('transcribing')
-        try {
-          const blob = new Blob(chunks, { type: capture.mimeType })
-          if (!blob.size)
-            throw new Error('Die Aufnahme ist leer. Bitte sprich noch einmal.')
-          const text = await transcribe(blob, turn.id, turn.controller.signal)
-          if (isCurrent(turn)) await respond(text, turn)
-        } catch (cause) {
-          fail(cause, turn)
-        }
+        const stopMessage = JSON.stringify({ type: 'stop' })
+        if (live.readyState === WebSocket.OPEN) live.send(stopMessage)
+        else live.addEventListener('open', () => live.send(stopMessage), { once: true })
+        clearCapture(false)
       }
-      capture.start(1_000)
-      if (automatic) {
-        const detector = new SpeechPauseDetector(stream)
-        pauseDetector.current = detector
-        await detector.start(() => {
-          if (isCurrent(turn) && capture.state === 'recording')
-            finishRecording()
-        })
-        if (!isCurrent(turn)) {
-          detector.stop()
-          return
+      finishLive.current = finish
+      audioProcessor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0)
+        const pcm = new Int16Array(input.length)
+        let sum = 0
+        for (let index = 0; index < input.length; index++) {
+          const sample = input[index]
+          pcm[index] = Math.max(-1, Math.min(1, sample)) * 32767
+          sum += sample * sample
+        }
+        if (++audioFrames % 8 === 0 && automatic) {
+          const level = Math.sqrt(sum / input.length)
+          if (level >= 0.01) {
+            heardSpeech = true
+            lastSpeechAt = performance.now()
+          } else if (heardSpeech && performance.now() - lastSpeechAt >= 1_200) {
+            finish()
+          }
+        }
+        if (live.readyState === WebSocket.OPEN) live.send(pcm.buffer)
+      }
+      audioSource.connect(audioProcessor)
+      audioProcessor.connect(audioContext.destination)
+      live.onopen = () =>
+        live.send(JSON.stringify({ type: 'start', sample_rate: audioContext.sampleRate }))
+      live.onerror = () =>
+        fail(new Error('Die Mikrofonverbindung wurde unterbrochen.'), turn)
+      live.onmessage = ({ data }) => {
+        if (!isCurrent(turn)) return
+        try {
+          const message = JSON.parse(data)
+          if (message.type === 'partial' && typeof message.text === 'string')
+            setTranscript(message.text)
+          if (message.type === 'error')
+            fail(new Error(message.detail || 'Die Aufnahme konnte nicht verarbeitet werden.'), turn)
+          if (message.type === 'final') {
+            const text = typeof message.text === 'string' ? message.text.trim() : ''
+            if (text) void respond(text, turn)
+            else if (continuousRef.current)
+              setTimeout(() => void startRecording(true), 300)
+            else setPhase('idle')
+          }
+        } catch {
+          fail(new Error('Die Mikrofonantwort konnte nicht gelesen werden.'), turn)
         }
       }
       setPhase('recording')
       const startedAt = Date.now()
       timer.current = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startedAt) / 1_000)
-        setSeconds(elapsed)
-        if (elapsed >= 60 && capture.state === 'recording') {
-          if (automatic && !pauseDetector.current?.hasSpeech) {
+        if (elapsed >= 60 && finishLive.current) {
+          if (automatic && !heardSpeech) {
             fail(
               new Error(
-                'Ich habe keine Stimme gehört. Starte das Gespräch erneut oder schreibe eine Nachricht.',
+                'Ich habe keine Stimme gehört. Starte das Gespräch erneut.',
               ),
               turn,
             )
-          } else capture.stop()
+          } else finish()
         }
       }, 250)
     } catch (cause) {
@@ -348,8 +368,8 @@ export function useCompanion(
       fail(
         new Error(
           denied
-            ? 'Das Mikrofon ist nicht freigegeben. Erlaube den Zugriff im Browser oder schreibe deine Nachricht.'
-            : 'Kein Mikrofon verfügbar. Prüfe dein Mikrofon oder schreibe deine Nachricht.',
+            ? 'Das Mikrofon ist nicht freigegeben. Erlaube den Zugriff im Browser.'
+            : 'Kein Mikrofon verfügbar. Prüfe dein Mikrofon.',
         ),
         turn,
       )
@@ -359,14 +379,48 @@ export function useCompanion(
   function startConversation() {
     continuousRef.current = true
     setContinuous(true)
-    return startRecording(true)
+    const onboardingPrompt = settings.current.onboarding
+    if (onboardingPrompt) return startOnboarding(onboardingPrompt)
+    return startGreeting()
+  }
+
+  async function startOnboarding(onboarding: NonNullable<ProfileState['onboarding']>) {
+    const prompt = onboarding.key === 'name'
+      ? `Welcome to Sound Flux. I would like to get to know you a little better. ${onboarding.question}`
+      : onboarding.question
+    return speakBeforeListening(prompt, onboarding.key)
+  }
+
+  async function startGreeting() {
+    return speakBeforeListening("Let's do some music.")
+  }
+
+  async function speakBeforeListening(prompt: string, onboardingKey: string | null = null) {
+    const turn = beginTurn()
+    pendingOnboardingKey.current = onboardingKey
+    setAnswer(prompt)
+    setPhase('thinking')
+    try {
+      const blob = await createSpeech(turn.id, prompt, turn.controller.signal)
+      if (!isCurrent(turn)) return
+      const url = URL.createObjectURL(blob)
+      audioUrl.current = url
+      const audio = new Audio(url)
+      audio.volume = settings.current.volume
+      player.current = audio
+      audio.onended = () => {
+        if (continuousRef.current && isCurrent(turn))
+          void startRecording(true, turn)
+      }
+      await audio.play()
+      if (isCurrent(turn)) setPhase('speaking')
+    } catch (cause) {
+      fail(cause, turn)
+    }
   }
 
   function finishRecording() {
-    if (recorder.current?.state === 'recording') {
-      setPhase('transcribing')
-      clearCapture()
-    }
+    finishLive.current?.()
   }
 
   async function replay() {
@@ -411,11 +465,9 @@ export function useCompanion(
     transcript,
     answer,
     error,
-    seconds,
     canReplay,
     turns,
     continuous,
-    send,
     startRecording,
     startConversation,
     finishRecording,
