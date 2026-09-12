@@ -47,6 +47,51 @@ class InterruptTest(unittest.TestCase):
                 websocket.send_text(json.dumps({"type": "stop"}))
         self.assertNotIn(turn_id, app.cancel_events)
 
+    def test_profile_onboarding_and_correction(self):
+        import tempfile
+        from pathlib import Path
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                self.assertEqual(app.profile_state()["onboarding"]["key"], "name")
+                self.assertEqual(app.profile_state()["onboarding"]["category"], "Personal")
+                app.save_profile_property("name", "Ada")
+                app.apply_profile_updates("I was actually born in 1922.")
+                app.record_interaction("user", "Hello")
+                state = app.profile_state()
+                self.assertEqual(state["onboarding"]["key"], "mood")
+                self.assertEqual({item["key"]: item["value"] for item in state["properties"]}["birth_year"], "1922")
+                self.assertEqual(state["greeting"], "Welcome back after a short break, Ada.")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_partial_profile_updates_do_not_block_a_turn(self):
+        import tempfile
+        from pathlib import Path
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                app.apply_profile_updates("I'm feeling calm. I love jazz.")
+                app.apply_profile_updates("Call me Ada and I'm feeling great.")
+                values = {item["key"]: item["value"] for item in app.profile_state()["properties"]}
+                self.assertEqual(values["name"], "Ada")
+                self.assertEqual(values["mood"], "great")
+                self.assertIn("jazz", values["music_preferences"].lower())
+                self.assertEqual(app.profile_state()["onboarding"]["key"], "birth_year")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_index_embeds_profile_state(self):
+        response = asyncio.run(app.index())
+        self.assertNotIn(b"__INITIAL_STATE__", response.body)
+        self.assertIn(b'initial-state', response.body)
+
 
 if __name__ == "__main__":
     unittest.main()

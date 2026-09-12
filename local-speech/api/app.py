@@ -1,18 +1,24 @@
 import asyncio
 import contextlib
+import io
 import json
 import os
+import re
+import sqlite3
 import sys
 import tempfile
 import uuid
 import wave
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
 import httpx
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from mlx_audio.tts.utils import load_model
 from pydantic import BaseModel, Field
 
 
@@ -22,18 +28,49 @@ DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3.5:2b")
 DEFAULT_TTS_MODEL = os.getenv("TTS_MODEL", "mlx-community/Kokoro-82M-8bit")
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 LIVE_WINDOW_SECONDS = 4
+DB_PATH = Path(os.getenv("PROFILE_DB", Path(__file__).with_name("sound_flux.db")))
+ONBOARDING_QUESTIONS = (
+    ("name", "Name", "Personal", "What should I call you?"),
+    ("birth_year", "Birth year", "Personal", "What year were you born?"),
+    ("mood", "Mood", "Session", "How are you feeling today?"),
+    ("music_preferences", "Music preferences", "Music", "What music, artists, or instruments do you enjoy?"),
+)
 
-SYSTEM_INSTRUCTIONS = """You are Sound Flux, a calm musical companion.
-Give short, concrete suggestions that invite musical expression. Respect a user's
-stated preferences and accessibility needs, but do not infer diagnoses or medical
-facts from movement. If the user says stop, pause, or interrupts, stop the current
-activity and ask what they want next. Never invent memories; use only the supplied
-profile and conversation. Keep spoken answers to two sentences unless asked for more."""
+SYSTEM_INSTRUCTIONS = """You are Sound Flux, a warm musical companion.
+Use only known preferences and never infer medical facts. Answer the user's actual request first.
+Profile questions are optional: never demand missing details; invite at most one when it fits naturally.
+If interrupted, stop. Answer in one short sentence, at most 18 words."""
 
-app = FastAPI(title="Sound Flux Voice API", version="0.1.0")
+
+def synthesize_tts(model, text: str, voice: str) -> bytes:
+    result = next(iter(model.generate(
+        text=text, voice=voice, speed=1.0, lang_code="en", temperature=0.7,
+        verbose=False, stream=False, streaming_interval=2.0, instruct=None,
+        use_zero_spk_emb=False, max_tokens=1200,
+    )))
+    pcm = (np.clip(np.asarray(result.audio), -1, 1) * 32767).astype("<i2")
+    with io.BytesIO() as output:
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(result.sample_rate)
+            wav.writeframes(pcm.tobytes())
+        return output.getvalue()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    model = await asyncio.to_thread(load_model, DEFAULT_TTS_MODEL)
+    await asyncio.to_thread(synthesize_tts, model, "Ready.", "af_heart")
+    app.state.tts_model = model
+    yield
+
+
+app = FastAPI(title="Sound Flux Voice API", version="0.1.0", lifespan=lifespan)
 cancel_events: dict[str, asyncio.Event] = {}
 active_processes: defaultdict[str, set[asyncio.subprocess.Process]] = defaultdict(set)
 active_chat_tasks: dict[str, asyncio.Task] = {}
+tts_lock = asyncio.Lock()
 
 
 class Message(BaseModel):
@@ -53,6 +90,107 @@ class SpeechRequest(BaseModel):
     turn_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     text: str = Field(min_length=1, max_length=2_000)
     voice: str = "af_heart"
+
+
+class ProfileUpdate(BaseModel):
+    value: str = Field(min_length=1, max_length=500)
+
+
+def database() -> sqlite3.Connection:
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_database() -> None:
+    with database() as connection:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS profile_properties (
+                key TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                value TEXT NOT NULL,
+                is_profile_property INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS interactions (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL
+            );
+        """)
+
+
+def save_profile_property(key: str, value: str) -> None:
+    labels = {question_key: label for question_key, label, _, _ in ONBOARDING_QUESTIONS}
+    if key not in labels:
+        raise HTTPException(404, "Unknown profile property")
+    with database() as connection:
+        connection.execute(
+            """INSERT INTO profile_properties (key, label, value, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP""",
+            (key, labels[key], value.strip()),
+        )
+
+
+def profile_properties() -> list[dict]:
+    categories = {key: category for key, _, category, _ in ONBOARDING_QUESTIONS}
+    with database() as connection:
+        return [dict(row) | {"category": categories[row["key"]], "is_profile_property": bool(row["is_profile_property"])} for row in connection.execute(
+            "SELECT key, label, value, is_profile_property, updated_at FROM profile_properties ORDER BY label"
+        )]
+
+
+def record_interaction(role: str, content: str) -> None:
+    with database() as connection:
+        connection.execute("INSERT INTO interactions (role, content) VALUES (?, ?)", (role, content))
+
+
+def profile_state() -> dict:
+    properties = profile_properties()
+    values = {item["key"]: item["value"] for item in properties}
+    pending = next((
+        {"key": key, "label": label, "category": category, "question": question}
+        for key, label, category, question in ONBOARDING_QUESTIONS if key not in values
+    ), None)
+    with database() as connection:
+        latest = connection.execute("SELECT created_at FROM interactions ORDER BY id DESC LIMIT 1").fetchone()
+        short_break = latest and connection.execute(
+            "SELECT (julianday('now') - julianday(?)) * 86400 < 600", (latest["created_at"],)
+        ).fetchone()[0]
+    greeting = "Welcome today." if latest is None else (
+        "Welcome back after a short break." if short_break else "Welcome back."
+    )
+    if values.get("name"):
+        greeting = greeting.rstrip(".") + f", {values['name']}."
+    return {"greeting": greeting, "properties": properties, "onboarding": pending}
+
+
+def apply_profile_updates(text: str) -> None:
+    lower = text.lower()
+    if "born" in lower or "birth year" in lower:
+        year = re.search(r"\b(?:18|19|20)\d{2}\b", text)
+        if year:
+            save_profile_property("birth_year", year.group())
+    name = re.search(r"\b(?:my name is|call me)\s+([A-Za-z][A-Za-z'-]*(?:\s+(?!and\b|but\b|i['’]m\b)[A-Za-z][A-Za-z'-]*)?)", text, re.I)
+    if name:
+        save_profile_property("name", name.group(1).strip())
+    mood = re.search(r"\b(?:i feel|i am feeling|i'm feeling|my mood is)\s+([^.!?]{1,80})", text, re.I)
+    if mood:
+        save_profile_property("mood", mood.group(1).strip())
+    music = re.search(
+        r"\b(?:my (?:favorite|favourite) (?:music|artist|song|instrument) is|"
+        r"i (?:like|love|prefer|enjoy) (?:music|jazz|classical|rock|pop|blues|folk|country|metal|electronic|hip[ -]?hop))"
+        r"\s*([^.!?]{0,100})",
+        text,
+        re.I,
+    )
+    if music:
+        save_profile_property("music_preferences", music.group().strip())
+
+
+initialize_database()
 
 
 def event_for(turn_id: str) -> asyncio.Event:
@@ -136,12 +274,27 @@ async def health():
         "stt_model": DEFAULT_STT_MODEL,
         "chat_model": DEFAULT_CHAT_MODEL,
         "tts_model": DEFAULT_TTS_MODEL,
+        "profile_properties": len(profile_properties()),
     }
 
 
 @app.get("/")
 async def index():
-    return FileResponse(Path(__file__).with_name("index.html"))
+    initial_state = json.dumps(profile_state()).replace("<", "\\u003c")
+    html = Path(__file__).with_name("index.html").read_text().replace("__INITIAL_STATE__", initial_state)
+    return HTMLResponse(html)
+
+
+@app.get("/v1/profile")
+async def get_profile():
+    return profile_state()
+
+
+@app.put("/v1/profile/{key}")
+async def update_profile(key: str, update: ProfileUpdate):
+    save_profile_property(key, update.value)
+    record_interaction("user", f"{key}: {update.value.strip()}")
+    return profile_state()
 
 
 @app.websocket("/v1/live/{turn_id}")
@@ -257,20 +410,29 @@ async def chat(request: ChatRequest):
     event = event_for(request.turn_id)
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
-    profile = "\n".join(f"- {item}" for item in request.profile) or "No saved profile items."
+    apply_profile_updates(request.message)
+    record_interaction("user", request.message)
+    saved_profile = [f"- {item['label']}: {item['value']}" for item in profile_properties()]
+    missing = [label for key, label, _, _ in ONBOARDING_QUESTIONS if key not in {item["key"] for item in profile_properties()}]
+    profile = "\n".join([*saved_profile, *[f"- {item}" for item in request.profile]]) or "No saved profile items."
     messages = [
-        {"role": "system", "content": f"{SYSTEM_INSTRUCTIONS}\n\nProfile:\n{profile}"},
+        {"role": "system", "content": f"{SYSTEM_INSTRUCTIONS}\n\nProfile:\n{profile}\n\nOptional missing profile fields: {', '.join(missing) or 'none'}"},
         *[message.model_dump() for message in request.history],
         {"role": "user", "content": request.message},
     ]
 
     async def stream():
         active_chat_tasks[request.turn_id] = asyncio.current_task()
+        answer = []
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120, read=None)) as client:
                 async with client.stream(
                     "POST", OLLAMA_URL,
-                    json={"model": request.model, "messages": messages, "stream": True, "think": False, "keep_alive": "30m"},
+                    json={
+                        "model": request.model, "messages": messages, "stream": True,
+                        "think": False, "keep_alive": "30m",
+                        "options": {"num_predict": 48, "num_ctx": 2048},
+                    },
                 ) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
@@ -281,7 +443,10 @@ async def chat(request: ChatRequest):
                         payload = json.loads(line)
                         token = payload.get("message", {}).get("content", "")
                         if token:
+                            answer.append(token)
                             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': token})}\n\n"
+                    if answer and not event.is_set():
+                        record_interaction("assistant", "".join(answer))
                     yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
         except asyncio.CancelledError:
             return
@@ -296,16 +461,13 @@ async def chat(request: ChatRequest):
 
 @app.post("/v1/speech")
 async def speech(request: SpeechRequest):
-    with tempfile.TemporaryDirectory() as directory:
-        await run_process(
-            request.turn_id, sys.executable, "-m", "mlx_audio.tts.generate",
-            "--model", DEFAULT_TTS_MODEL, "--text", request.text, "--voice", request.voice,
-            "--output_path", directory,
-        )
-        audio_files = sorted(Path(directory).glob("*.wav"))
-        if not audio_files:
-            raise HTTPException(500, "TTS produced no audio")
-        audio = audio_files[0].read_bytes()
+    event = event_for(request.turn_id)
+    if event.is_set():
+        raise HTTPException(409, "Turn interrupted")
+    async with tts_lock:
+        audio = await asyncio.to_thread(synthesize_tts, app.state.tts_model, request.text, request.voice)
+    if event.is_set():
+        raise HTTPException(409, "Turn interrupted")
     cancel_events.pop(request.turn_id, None)
     return Response(audio, media_type="audio/wav", headers={"X-Turn-ID": request.turn_id})
 

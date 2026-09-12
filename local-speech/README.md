@@ -45,6 +45,12 @@ You can also type into **Say or type a message**. Typed and spoken turns share t
 
 The first transcription and speech request download and cache the MLX Whisper and Kokoro models. Later runs stay local.
 
+## Profile and onboarding
+
+On the first session, the companion asks for a name, birth year, mood, and music preferences. These are flagged as profile properties and stored locally in `api/sound_flux.db`. You can correct details naturally—for example: “I was actually born in 1922.”
+
+The next visit says **Welcome today**, **Welcome back after a short break** (within ten minutes), or **Welcome back**. The page also renders the current profile table on the server before JavaScript runs.
+
 ## Defaults
 
 | Part | Model |

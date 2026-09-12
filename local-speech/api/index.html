@@ -9,10 +9,14 @@
     form { display: flex; gap: .5rem; } input { flex: 1; min-width: 0; }
     section { margin: 1.5rem 0; } #transcript, #answer { white-space: pre-wrap; min-height: 2em; }
     small { color: #666; }
+    #welcome, #onboarding { margin: 1rem 0; } #onboarding { color: #555; }
+    table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }
   </style>
   <h1>Sound Flux Voice Companion</h1>
   <button id="record">Start listening</button>
   <small id="status">Continuous listening. Use headphones to avoid feedback.</small>
+  <p id="welcome"></p>
+  <p id="onboarding"></p>
   <section><strong>You</strong><div id="transcript"></div></section>
   <section><strong>Companion</strong><div id="answer"></div></section>
   <audio id="reply" controls></audio>
@@ -22,6 +26,11 @@
       <button>Ask companion</button>
     </form>
   </section>
+  <section>
+    <strong>Profile properties</strong>
+    <table><thead><tr><th>Category</th><th>Property</th><th>Value</th><th>Updated</th></tr></thead><tbody id="profile-rows"></tbody></table>
+  </section>
+  <script id="initial-state" type="application/json">__INITIAL_STATE__</script>
   <script>
     const button = document.querySelector('#record');
     const status = document.querySelector('#status');
@@ -30,6 +39,10 @@
     const player = document.querySelector('#reply');
     const messageForm = document.querySelector('#message-form');
     const messageInput = document.querySelector('#message');
+    const welcome = document.querySelector('#welcome');
+    const onboarding = document.querySelector('#onboarding');
+    const profileRows = document.querySelector('#profile-rows');
+    let profileState = JSON.parse(document.querySelector('#initial-state').textContent);
     const history = [];
     const SILENCE_MS = 1200;
     const SPEECH_THRESHOLD = 0.01;
@@ -37,6 +50,24 @@
     let continuous = false, endingTurn = false, speechSeen = false, lastSpeechAt = 0;
 
     const newTurn = () => crypto.randomUUID();
+
+    function renderProfile() {
+      welcome.textContent = profileState.greeting;
+      onboarding.textContent = profileState.onboarding ? `${profileState.onboarding.category} · Optional profile question: ${profileState.onboarding.question}` : '';
+      messageInput.placeholder = 'Say or type a message';
+      profileRows.replaceChildren(...profileState.properties.map(property => {
+        const row = document.createElement('tr');
+        for (const value of [property.category, property.label, property.value, property.updated_at]) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        return row;
+      }));
+    }
+
+    async function refreshProfile() {
+      profileState = await fetch('/v1/profile').then(response => response.json());
+      renderProfile();
+    }
 
     async function interrupt() {
       controller?.abort();
@@ -49,6 +80,21 @@
       processor?.disconnect(); source?.disconnect(); context?.close();
       stream?.getTracks().forEach(track => track.stop());
       processor = source = context = stream = null;
+    }
+
+    async function speak(text) {
+      const speech = await fetch('/v1/speech', {
+        method: 'POST', signal: controller?.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turn_id: turnId, text }),
+      });
+      if (!speech.ok) throw new Error(`Speech failed: ${await speech.text()}`);
+      player.src = URL.createObjectURL(await speech.blob());
+      try { await player.play(); status.textContent = 'Speaking…'; }
+      catch { status.textContent = 'Reply ready — press play.'; }
+      player.onended = () => {
+        status.textContent = 'Ready';
+        if (continuous) start(true);
+      };
     }
 
     async function ask(text) {
@@ -75,18 +121,7 @@
         }
       }
       if (!answer.textContent || controller.signal.aborted) return false;
-      const speech = await fetch('/v1/speech', {
-        method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turn_id: turnId, text: answer.textContent }),
-      });
-      if (!speech.ok) throw new Error(`Speech failed: ${await speech.text()}`);
-      player.src = URL.createObjectURL(await speech.blob());
-      try { await player.play(); status.textContent = 'Speaking…'; }
-      catch { status.textContent = 'Reply ready — press play.'; }
-      player.onended = () => {
-        status.textContent = 'Ready';
-        if (continuous) start(true);
-      };
+      await speak(answer.textContent);
       return true;
     }
 
@@ -101,6 +136,7 @@
         }
         history.push({ role: 'user', content: text }, { role: 'assistant', content: answer.textContent });
         if (history.length > 12) history.splice(0, history.length - 12);
+        await refreshProfile();
       } catch (error) {
         status.textContent = controller?.signal.aborted ? 'Interrupted' : error.message;
         if (continuous) setTimeout(() => start(true), 300);
@@ -170,6 +206,7 @@
     }
 
     button.onclick = () => continuous ? endSession() : start();
+    renderProfile();
     messageForm.onsubmit = async event => {
       event.preventDefault();
       const text = messageInput.value.trim();

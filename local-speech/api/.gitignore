@@ -1,2 +1,5 @@
 .venv/
 __pycache__/
+sound_flux.db
+sound_flux.db-shm
+sound_flux.db-wal
