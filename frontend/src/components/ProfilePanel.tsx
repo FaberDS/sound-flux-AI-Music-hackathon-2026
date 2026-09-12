@@ -43,17 +43,17 @@ export function ProfilePanel({
       .map(({ key }) => [key, draft[key].trim()] as [ProfileKey, string])
     if (changes.some(([, value]) => !value)) {
       setError(
-        'Bitte ersetze die gespeicherte Angabe durch einen neuen Wert. Alle Angaben kannst du unten löschen.',
+        'Please replace the saved detail with a new value. You can delete all details below.',
       )
       return
     }
     try {
       const updated = await saved.save(changes)
       setDraft(profileValues(updated ?? null))
-      setNotice('Angaben gespeichert.')
+      setNotice('Details saved.')
     } catch {
       setError(
-        'Speichern nicht abgeschlossen. Prüfe die Verbindung und versuche es erneut. Bereits gespeicherte Änderungen bleiben erhalten.',
+        'Saving was not completed. Check the connection and try again. Changes already saved will remain.',
       )
     }
   }
@@ -68,13 +68,13 @@ export function ProfilePanel({
       if (confirmation === 'all') setDraft(profileValues(null))
       setNotice(
         confirmation === 'all'
-          ? 'Alle gespeicherten Daten gelöscht.'
-          : 'Gesprächsverlauf gelöscht. Die Angaben zur Person bleiben erhalten.',
+          ? 'All saved data deleted.'
+          : 'Conversation history deleted. Personal details remain saved.',
       )
       setConfirmation(null)
     } catch {
       setError(
-        'Die Daten konnten nicht gelöscht werden. Prüfe die Verbindung und versuche es erneut.',
+        'The data could not be deleted. Check the connection and try again.',
       )
     }
   }
@@ -82,12 +82,12 @@ export function ProfilePanel({
   return (
     <>
       <p className="dialog-intro">
-        Hier siehst du, was Sound Flux über die Person weiß. Du kannst Angaben
-        ergänzen oder korrigieren. Alle Felder sind freiwillig.
+        Here you can see what Sound Flux knows about this person. You can add
+        or correct details. Every field is optional.
       </p>
       {saved.loading && (
         <p className="saved-note" role="status">
-          Gespeicherte Angaben werden geladen …
+          Loading saved details …
         </p>
       )}
       {saved.errors.profile && (
@@ -95,7 +95,7 @@ export function ProfilePanel({
           <p>{saved.errors.profile}</p>
           <button onClick={() => void saved.refresh()} disabled={saved.busy}>
             <RefreshCw size={15} />
-            Erneut laden
+            Load again
           </button>
         </div>
       )}
@@ -145,27 +145,27 @@ export function ProfilePanel({
             {saved.busy ? (
               <>
                 <LoaderCircle size={18} className="animate-spin" />
-                Wird gespeichert …
+                Saving …
               </>
             ) : (
               <>
                 <Check size={18} />
-                Angaben speichern
+                Save details
               </>
             )}
           </button>
         </fieldset>
         <p className="dialog-note">
           <ShieldCheck size={19} />
-          Die Angaben und Gespräche werden lokal auf diesem Mac gespeichert und
-          bei späteren Gesprächen wieder verwendet.
+          Details and conversations are stored locally on this Mac and used in
+          later conversations.
         </p>
       </form>
       <div className="saved-data-actions">
-        <h3>Gespeicherte Daten</h3>
+        <h3>Saved data</h3>
         <p>
-          Du kannst nur den Gesprächsverlauf oder alle Daten einschließlich der
-          Angaben zur Person löschen.
+          You can delete just the conversation history or all data, including
+          personal details.
         </p>
         <div className="flex flex-wrap gap-2">
           <button
@@ -177,7 +177,7 @@ export function ProfilePanel({
             disabled={saved.busy || Boolean(confirmation)}
           >
             <Trash2 size={15} />
-            Verlauf löschen
+            Delete history
           </button>
           <button
             onClick={() => {
@@ -188,19 +188,19 @@ export function ProfilePanel({
             disabled={saved.busy || Boolean(confirmation)}
           >
             <Trash2 size={15} />
-            Alle gespeicherten Daten löschen
+            Delete all saved data
           </button>
         </div>
         {confirmation && (
           <div
             className="delete-confirmation"
             role="group"
-            aria-label="Löschen bestätigen"
+            aria-label="Confirm deletion"
           >
             <p>
               {confirmation === 'all'
-                ? 'Alle Gespräche und Angaben zur Person auf diesem Mac endgültig löschen?'
-                : 'Alle gespeicherten Gespräche auf diesem Mac endgültig löschen? Die Angaben zur Person bleiben erhalten.'}
+                ? 'Permanently delete all conversations and personal details from this Mac?'
+                : 'Permanently delete all saved conversations from this Mac? Personal details will remain.'}
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -209,16 +209,16 @@ export function ProfilePanel({
                 disabled={saved.busy}
               >
                 {saved.busy
-                  ? 'Wird gelöscht …'
+                  ? 'Deleting …'
                   : confirmation === 'all'
-                    ? 'Alle Daten endgültig löschen'
-                    : 'Verlauf endgültig löschen'}
+                    ? 'Permanently delete all data'
+                    : 'Permanently delete history'}
               </button>
               <button
                 onClick={() => setConfirmation(null)}
                 disabled={saved.busy}
               >
-                Abbrechen
+                Cancel
               </button>
             </div>
           </div>
@@ -241,11 +241,10 @@ export function ProfilePanel({
         disabled={saved.busy}
       >
         <RotateCcw size={16} />
-        Sitzung beenden
+        End session
       </button>
       <p className="session-note">
-        Beendet die Wiedergabe und leert die aktuelle Antwort. Gespeicherte
-        Daten bleiben erhalten.
+        Stops playback and clears the current answer. Saved data remains.
       </p>
     </>
   )

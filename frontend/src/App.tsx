@@ -6,17 +6,14 @@ import {
   type ReactNode,
 } from 'react'
 import {
-  ArrowDown,
   ArrowRight,
   AudioLines,
   BellRing,
   Check,
   ChevronRight,
-  CircleHelp,
   Drum,
   Guitar,
   Heart,
-  Keyboard,
   LoaderCircle,
   Mic,
   Music2,
@@ -50,41 +47,37 @@ import amazingGraceWedding from '../assets/amazing_grace/wedding.webp'
 const instruments = [
   {
     id: 'piano',
-    name: 'Klavier',
-    detail: 'Ein paar sanfte Töne',
+    name: 'Piano',
     icon: Piano,
     className: 'instrument-piano',
   },
   {
     id: 'guitar',
-    name: 'Gitarre',
-    detail: 'Ein warmer Saitenklang',
+    name: 'Guitar',
     icon: Guitar,
     className: 'instrument-guitar',
   },
   {
     id: 'bells',
     name: 'Glockenspiel',
-    detail: 'Ein kleiner Lichtblick',
     icon: BellRing,
     className: 'instrument-bells',
   },
   {
     id: 'drum',
-    name: 'Trommel',
-    detail: 'Dein eigener Rhythmus',
+    name: 'Drum',
     icon: Drum,
     className: 'instrument-drum',
   },
 ] as const
 
 const phaseText: Record<Phase, string> = {
-  idle: 'Zeit für deine Musik',
-  permission: 'Mikrofon wird geöffnet …',
-  recording: 'Ich höre dir zu …',
-  transcribing: 'Deine Worte werden erkannt …',
-  thinking: 'Deine Antwort entsteht …',
-  speaking: 'Sound Flux spricht …',
+  idle: 'Time for your music',
+  permission: 'Opening the microphone …',
+  recording: 'I’m listening …',
+  transcribing: 'Understanding your words …',
+  thinking: 'Creating your answer …',
+  speaking: 'Sound Flux is speaking …',
 }
 
 const amazingGraceImages = [
@@ -139,7 +132,7 @@ function Dialog({
         <button
           onClick={onClose}
           className="icon-button shrink-0"
-          aria-label="Schließen"
+          aria-label="Close"
           disabled={!dismissible}
         >
           <X size={22} />
@@ -169,13 +162,10 @@ function RecordArtwork({ active }: { active: boolean }) {
       <Music2 className="floating-note note-two" size={23} strokeWidth={1.7} />
       <div className="vinyl">
         <div className="record-label">
-          <span>SOUND FLUX</span>
           <AudioLines size={34} strokeWidth={1.6} />
-          <span>MUSIC & MEMORIES</span>
           <i />
         </div>
       </div>
-      <span className="art-caption">FÜR DIE FREUDE AM MOMENT</span>
     </div>
   )
 }
@@ -221,7 +211,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
       ?.value ?? '',
   )
   const busy = companion.phase !== 'idle' || companion.continuous
-  const showAmazingGrace = !saved.profile?.onboarding && busy
+  const showAmazingGrace = companion.playMode || (!saved.profile?.onboarding && busy)
   const history = mergeTurns(saved.history, companion.turns)
   const companionRef = useRef<HTMLElement | null>(null)
 
@@ -275,7 +265,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
         flashTimer.current = setTimeout(() => setActiveInstrument(null), 220)
       } catch {
         setMusicError(
-          'Der Ton konnte nicht starten. Prüfe die Audiofreigabe deines Browsers.',
+          'The sound could not start. Check your browser’s audio permission.',
         )
       }
     },
@@ -325,7 +315,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setMusicError('')
     } catch {
       setMusicError(
-        'Der Ton konnte nicht starten. Prüfe die Audiofreigabe deines Browsers.',
+        'The sound could not start. Check your browser’s audio permission.',
       )
     }
   }
@@ -337,7 +327,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
       } catch {
         setPlaying(false)
         setMusicError(
-          'Die Musik konnte nicht starten. Bitte versuche es noch einmal.',
+          'The music could not start. Please try again.',
         )
       }
     }
@@ -386,7 +376,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   }
 
   async function clearDebugData() {
-    if (!window.confirm('Alle gespeicherten Profil- und Chat-Daten löschen?')) return
+    if (!window.confirm('Delete all saved profile and chat data?')) return
     try {
       await saved.erase('all', companion.stop)
       window.location.reload()
@@ -464,12 +454,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#musikraum">
-        Zum Musikraum
+        Skip to music room
       </a>
       <header className="site-header">
         <a
           href="#musikraum"
-          aria-label="Sound Flux, zum Musikraum"
+          aria-label="Sound Flux, music room"
           className="brand"
         >
           <span className="brand-icon">
@@ -479,56 +469,30 @@ export default function App({ debug = false }: { debug?: boolean }) {
             sound flux<span className="brand-dot">.</span>
           </span>
         </a>
-        <nav className="desktop-nav" aria-label="Hauptnavigation">
-          <a href="#musikraum" className="nav-link active" aria-current="page">
-            Musikraum
-          </a>
+        <nav className="desktop-nav" aria-label="Main navigation">
           <button className="nav-link" onClick={() => setDialog('help')}>
-            So funktioniert's
+            How it works
           </button>
         </nav>
         <button
           className="companion-link"
-          aria-label="Für Begleitpersonen"
+          aria-label="For companions"
           onClick={openProfile}
         >
           <Users size={18} />
-          <span>Für Begleitpersonen</span>
+          <span>For companions</span>
           <ChevronRight size={16} />
         </button>
       </header>
       <main id="musikraum" className="main-content">
         <section className="hero-grid" aria-labelledby="page-title">
           <div className="hero-copy">
-            <div className="eyebrow">
-              <span className="small-sun" /> MUSIK, DIE VERBINDET
-            </div>
-            <h1 id="page-title">
-              MUSIK BLEIBT.
-              <br />
-              FREUDE{' '}
-              <span className="headline-accent">
-                AUCH.
-                <svg
-                  viewBox="0 0 270 16"
-                  preserveAspectRatio="none"
-                  aria-hidden="true"
-                >
-                  <path d="M4 11 Q130 1 265 8" />
-                </svg>
-              </span>
-            </h1>
-            <p className="hero-serif">
-              Ein vertrauter Klang.
-              <br />
-              Ein gemeinsamer Moment.
-            </p>
+            <h1 id="page-title">MAKE MUSIC.</h1>
             <p className="hero-description">
-              Höre zu, sing mit oder spiele einfach los.
-              <br className="hidden sm:block" /> Alles in deinem Tempo.
+              Choose a sound or talk with Sound Flux.
             </p>
             <fieldset className="mood-selection">
-              <legend>Wie soll es heute klingen?</legend>
+              <legend>Choose a sound</legend>
               <div className="flex flex-wrap gap-2.5">
                 <button
                   onClick={() => void chooseMood('calm')}
@@ -536,7 +500,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   className={`mood-button ${mood === 'calm' ? 'selected' : ''}`}
                 >
                   <Heart size={17} />
-                  Ruhig & vertraut{mood === 'calm' && <Check size={16} />}
+                  Calm{mood === 'calm' && <Check size={18} />}
                 </button>
                 <button
                   onClick={() => void chooseMood('bright')}
@@ -544,31 +508,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   className={`mood-button ${mood === 'bright' ? 'selected' : ''}`}
                 >
                   <Music2 size={17} />
-                  Fröhlich & neu{mood === 'bright' && <Check size={16} />}
+                  Bright{mood === 'bright' && <Check size={18} />}
                 </button>
               </div>
             </fieldset>
-            <div className="flex flex-wrap items-center gap-5">
-              <button
-                className="music-button"
-                onClick={() => void toggleMusic()}
-              >
-                {playing ? (
-                  <Pause size={20} fill="currentColor" />
-                ) : (
-                  <Play size={20} fill="currentColor" />
-                )}
-                {playing ? 'Musik pausieren' : 'Musik starten'}
-              </button>
-              <a className="try-instruments" href="#instrumente">
-                Oder selbst spielen <ArrowDown size={16} />
-              </a>
-            </div>
-            <p className="music-caption" role="status">
-              {playing
-                ? 'Deine Melodie spielt. Du kannst jederzeit mitspielen.'
-                : 'Eine eigene kleine Melodie, nur für diesen Moment.'}
-            </p>
+            <button
+              className="music-button"
+              onClick={() => void toggleMusic()}
+            >
+              {playing ? (
+                <Pause size={24} fill="currentColor" />
+              ) : (
+                <Play size={24} fill="currentColor" />
+              )}
+              {playing ? 'Pause music' : 'Start music'}
+            </button>
             {musicError && (
               <p className="error-message" role="alert">
                 {musicError}
@@ -578,23 +532,22 @@ export default function App({ debug = false }: { debug?: boolean }) {
           <section
             ref={companionRef}
             className={`companion-card ${busy ? 'session-active' : ''}`}
-            aria-label="Sprachbegleitung"
+            aria-label="Voice companion"
             tabIndex={-1}
           >
-            <div className="flex items-center justify-between gap-3">
-              <span className="card-eyebrow">DEIN MUSIKBEGLEITER</span>
+            <div className="flex items-center gap-3">
               <button
                 className={`connection-status ${connection}`}
                 onClick={() => void refreshConnection()}
-                title="Verbindung zur Sprachbegleitung erneut prüfen"
-                aria-label={`Sprach-API ${connection === 'online' ? 'erreichbar' : connection === 'offline' ? 'offline' : 'wird geprüft'}. Verbindung erneut prüfen`}
+                title="Check the voice companion connection again"
+                aria-label={`Voice API ${connection === 'online' ? 'available' : connection === 'offline' ? 'offline' : 'being checked'}. Check the connection again`}
               >
                 <span />
                 {connection === 'checking'
-                  ? 'Verbinde …'
+                  ? 'Connecting …'
                   : connection === 'online'
-                    ? 'API verbunden'
-                    : 'Sprache offline'}
+                    ? 'Voice ready'
+                    : 'Voice unavailable'}
               </button>
             </div>
             {showAmazingGrace ? (
@@ -609,7 +562,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                         ? 'listening'
                         : 'thinking'
                   }
-                  size={176}
+                  size={440}
                   showStatus={false}
                 />
               </div>
@@ -623,7 +576,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
               aria-busy={companion.phase === 'thinking'}
             >
               {companion.transcript && (
-                <p className="transcript">Du: {companion.transcript}</p>
+                <p className="transcript">You: {companion.transcript}</p>
               )}
               <h2 className={companion.answer ? 'answer-text' : ''}>
                 {companion.answer ||
@@ -634,29 +587,13 @@ export default function App({ debug = false }: { debug?: boolean }) {
               {!companion.answer && (
                 <p>
                   {companion.phase === 'recording'
-                    ? 'Sprich in Ruhe. Nach einer kurzen Pause antworte ich.'
+                    ? 'Take your time. I’ll reply after a short pause.'
                     : companion.phase === 'idle'
-                      ? 'Erzähl von deiner Lieblingsmusik.'
-                      : 'Du kannst jederzeit auf Stopp tippen.'}
+                      ? 'Tell me about your favorite music.'
+                      : 'You can tap stop at any time.'}
                 </p>
               )}
             </div>
-            {saved.profile?.onboarding &&
-              !onboardingDismissed &&
-              !busy &&
-              !companion.answer && (
-                <div className="onboarding-offer">
-                  <p>
-                    {onboardingQuestion(saved.profile)} <span>Freiwillig.</span>
-                  </p>
-                  <div>
-                    <button onClick={openProfile}>Angaben ergänzen</button>
-                    <button onClick={() => setOnboardingDismissed(true)}>
-                      Später
-                    </button>
-                  </div>
-                </div>
-              )}
             {companion.error && (
               <p role="alert" className="error-message mt-3">
                 {companion.error}
@@ -681,12 +618,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   <Mic size={21} />
                 )}
                 {companion.continuous
-                  ? 'Gespräch beenden'
+                  ? 'End conversation'
                   : companion.phase === 'permission'
-                      ? 'Mikrofon öffnen …'
+                      ? 'Opening microphone …'
                       : companion.phase === 'transcribing'
-                        ? 'Worte erkennen …'
-                        : 'Mit Sound Flux sprechen'}
+                        ? 'Understanding words …'
+                        : 'Talk with Sound Flux'}
               </button>
             </div>
             {companion.canReplay && (
@@ -696,13 +633,29 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 disabled={companion.phase === 'speaking'}
               >
                 <Volume2 size={16} />
-                Antwort noch einmal hören
+                Hear the answer again
               </button>
             )}
             <p className="companion-footnote">
               <ShieldCheck size={13} />
-              Gespräche werden lokal auf diesem Mac gespeichert.
+              Saved on this Mac.
             </p>
+            {saved.profile?.onboarding &&
+              !onboardingDismissed &&
+              !busy &&
+              !companion.answer && (
+                <div className="onboarding-offer">
+                  <p>
+                    {onboardingQuestion(saved.profile)} <span>Optional.</span>
+                  </p>
+                  <div>
+                    <button onClick={openProfile}>Add details</button>
+                    <button onClick={() => setOnboardingDismissed(true)}>
+                      Later
+                    </button>
+                  </div>
+                </div>
+              )}
           </section>
         </section>
         <section
@@ -711,35 +664,25 @@ export default function App({ debug = false }: { debug?: boolean }) {
           aria-labelledby="instrument-title"
         >
           <div className="section-heading">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <h2 id="instrument-title">EINFACH LOSSPIELEN.</h2>
-              <p>Ein Tippen. Dein Klang.</p>
-            </div>
-            <span className="keyboard-hint">
-              <Keyboard size={16} />
-              Auch mit den Tasten 1 bis 4
-            </span>
+            <h2 id="instrument-title">PLAY AN INSTRUMENT</h2>
           </div>
           <div className="instrument-grid">
             {instruments.map(
               (
-                { id, name: instrumentName, detail, icon: Icon, className },
-                index,
+                { id, name: instrumentName, icon: Icon, className },
               ) => (
                 <button
                   key={id}
                   onClick={() => void playInstrument(id)}
                   className={`instrument-card ${className} ${activeInstrument === id ? 'is-active' : ''}`}
-                  aria-label={`${instrumentName} spielen`}
+                  aria-label={`Play ${instrumentName}`}
                 >
                   <span className="instrument-icon">
                     <Icon size={31} strokeWidth={1.5} />
                   </span>
                   <span className="instrument-description">
                     <strong>{instrumentName}</strong>
-                    <span>{detail}</span>
                   </span>
-                  <span className="instrument-key">{index + 1}</span>
                   <ArrowRight className="instrument-arrow" size={17} />
                 </button>
               ),
@@ -754,14 +697,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
           onManage={openProfile}
         />
         <div className="session-toolbar">
-          <span className="gentle-reminder">
-            <Heart size={17} />
-            Hier gibt es kein Richtig oder Falsch.
-          </span>
           <div className="audio-settings">
             <label className="volume-control">
               {volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-              <span className="sr-only">Lautstärke</span>
+              <span>Volume</span>
               <input
                 type="range"
                 min="0"
@@ -779,93 +718,79 @@ export default function App({ debug = false }: { debug?: boolean }) {
               <span className={`toggle-track ${readAloud ? 'on' : ''}`}>
                 <span />
               </span>
-              Antworten vorlesen
+              Read answers aloud
             </button>
             <button className="stop-all" onClick={stopAll}>
               <Square size={12} fill="currentColor" />
-              Alles stoppen
+              Stop everything
             </button>
           </div>
         </div>
       </main>
-      <footer className="site-footer">
-        <span>Mit Musik füreinander da.</span>
-        <span>
-          Sound Flux <span className="footer-dot">·</span> Music & memories
-        </span>
-        <button onClick={() => setDialog('help')}>
-          <CircleHelp size={15} />
-          Brauchst du Hilfe?
-        </button>
-      </footer>
       {(playing || busy) && (
         <button
           className="immediate-stop"
           onClick={stopAll}
-          aria-label="Sofort alles stoppen"
+          aria-label="Stop everything immediately"
         >
           <Square size={15} fill="currentColor" />
-          Stopp
+          Stop
         </button>
       )}
       <Dialog
         open={dialog === 'help'}
         onClose={() => setDialog(null)}
-        title="Dein Moment mit Musik"
+        title="Your moment with music"
       >
         <p className="dialog-intro">
-          Mach es dir bequem. Du entscheidest, was sich heute gut anfühlt.
+          Make yourself comfortable. You decide what feels good today.
         </p>
         <ol className="help-steps">
           <li>
             <span>1</span>
             <div>
-              <h3>Mit einer Melodie beginnen</h3>
+              <h3>Start with a melody</h3>
               <p>
-                Wähle ruhige oder fröhliche Klänge und tippe auf „Musik
-                starten“.
+                Choose calm or bright sounds and tap “Start music”.
               </p>
             </div>
           </li>
           <li>
             <span>2</span>
             <div>
-              <h3>Selbst mitspielen</h3>
+              <h3>Play along</h3>
               <p>
-                Tippe auf ein Instrument. Auf einer Tastatur funktionieren auch
-                die Tasten 1 bis 4.
+                Tap an instrument. On a keyboard, keys 1 to 4 work too.
               </p>
             </div>
           </li>
           <li>
             <span>3</span>
             <div>
-              <h3>Ein wenig erzählen</h3>
+              <h3>Share a little</h3>
               <p>
-                Tippe auf das Mikrofon und sprich. Nach einer kurzen Pause wird
-                deine Antwort automatisch gesendet.
+                Tap the microphone and speak. After a short pause, your answer
+                is sent automatically.
               </p>
             </div>
           </li>
         </ol>
         <p className="dialog-intro">
-          Eine kurze Sprechpause genügt, damit die Begleitung antwortet.
-          Nach der Antwort hört Sound Flux wieder zu, bis du das Gespräch
-          beendest.
+          A short speaking pause is enough for your companion to reply. After
+          the reply, Sound Flux listens again until you end the conversation.
         </p>
         <p className="dialog-note">
-          Mit „Alles stoppen“ enden Musik, Aufnahme und Sprachausgabe sofort.
-          Wenn die Sprachbegleitung offline ist, funktionieren die Instrumente
-          und Melodien weiterhin.
+          “Stop everything” immediately ends music, recording, and speech.
+          If the voice companion is offline, instruments and melodies still work.
         </p>
         <button className="dialog-primary" onClick={() => setDialog(null)}>
-          Zurück zur Musik <ArrowRight size={18} />
+          Back to music <ArrowRight size={18} />
         </button>
       </Dialog>
       <Dialog
         open={dialog === 'profile'}
         onClose={() => setDialog(null)}
-        title="Gemeinsam Musik erleben"
+        title="Experience music together"
         dismissible={!saved.busy}
       >
         {dialog === 'profile' && (

@@ -50,8 +50,7 @@ ONBOARDING_QUESTIONS = (
     ("strong_memory_song", "Strong memory song", "Music & memories", "Is there a song that brings back a particularly strong memory?"),
 )
 ONBOARDING_FLOW_KEYS = (
-    "name", "birth_year", "music_preferences", "played_instrument", "can_whistle",
-    "childhood_song", "strong_memory_song",
+    "name", "birth_year", "music_preferences",
 )
 DEBUG_ONBOARDING_VALUES = {
     "name": "Alex",
@@ -64,22 +63,18 @@ DEBUG_ONBOARDING_VALUES = {
 }
 
 SYSTEM_INSTRUCTIONS = """You are Sound Flux, a warm musical companion.
+The current year is 2026.
 Use only known preferences and never infer medical facts. Answer the user's actual request first.
 Profile questions are optional: never demand missing details; invite at most one when it fits naturally.
 If interrupted, stop. Answer in one short sentence, at most 18 words."""
 ONBOARDING_FOLLOW_UPS = {
     "name": (
-        "Thank you. What year were you born?",
-        "Lovely to meet you. Which year were you born?",
-        "Thank you. May I ask what year you were born?",
+        "Thank you, {name}. What year were you born?",
+        "Lovely to meet you, {name}. Which year were you born?",
+        "Thank you, {name}. May I ask what year you were born?",
     ),
     "birth_year": "What music do you enjoy?",
-    "music_preferences": "Did you ever play an instrument?",
-    "played_instrument": "Can you whistle?",
-    "can_whistle": "Is there a song that reminds you of your childhood?",
-    "childhood_song": "Is there a song that brings back a particularly strong memory?",
-    "strong_memory_song": "What would you like to remember: a person, a song, or a movie?",
-    "memorable_item": "Anything else would you like to remember?",
+    "music_preferences": "Wonderful. Let's do some music.",
 }
 MEMORABLE_ITEM_QUESTION = {"key": "memorable_item", "label": "Memorable item", "category": "Memories", "question": "What would you like to remember: a person, a song, or a movie?"}
 
@@ -313,6 +308,17 @@ async def search_musicbrainz(query: str) -> list[dict]:
 
 def is_song_request(text: str) -> bool:
     return bool(re.search(r"\b(?:recommend|suggest|find|play|looking for|what song|which song)\b", text, re.I))
+
+
+def is_play_music_request(text: str) -> bool:
+    return bool(re.search(r"\b(?:let'?s|lets|can we|i want to)\s+(?:play|make|do)\b[^.!?]{0,40}\bmusic\b", text, re.I))
+
+
+def next_onboarding_key(key: str | None) -> str | None:
+    if key not in ONBOARDING_FLOW_KEYS:
+        return None
+    index = ONBOARDING_FLOW_KEYS.index(key)
+    return ONBOARDING_FLOW_KEYS[index + 1] if index + 1 < len(ONBOARDING_FLOW_KEYS) else None
 
 
 def music_search_query(text: str) -> str:
@@ -709,6 +715,20 @@ async def chat(request: ChatRequest):
     event = event_for(request.turn_id)
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
+    if is_play_music_request(request.message):
+        answer = "Wonderful. Let's play some music."
+        logger.info("[turn %s] entering play mode", request.turn_id)
+        record_interaction("user", request.message)
+
+        async def play_mode_stream():
+            record_interaction("assistant", answer)
+            record_chat(request.turn_id, request.message, "play_mode", answer, 0)
+            yield f"event: mode\ndata: {json.dumps({'value': 'play'})}\n\n"
+            yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': answer})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
+            cancel_events.pop(request.turn_id, None)
+
+        return StreamingResponse(play_mode_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     apply_profile_updates(request.message)
     apply_onboarding_answer(request.onboarding_key, request.message)
     logger.info(
@@ -721,11 +741,16 @@ async def chat(request: ChatRequest):
     follow_up = None if request.onboarding_key == "memorable_item" and is_skip_answer(request.message) else ONBOARDING_FOLLOW_UPS.get(request.onboarding_key)
     if isinstance(follow_up, tuple):
         follow_up = random.choice(follow_up)
+    if request.onboarding_key == "name" and follow_up:
+        name = next((item["value"] for item in profile_properties() if item["key"] == "name"), "")
+        follow_up = follow_up.format(name=name) if name else "Thank you. What year were you born?"
     if follow_up:
         logger.info("[turn %s] onboarding follow-up=%r", request.turn_id, follow_up)
         async def onboarding_stream():
             record_interaction("assistant", follow_up)
             record_chat(request.turn_id, request.message, "onboarding", follow_up, 0)
+            next_key = next_onboarding_key(request.onboarding_key)
+            yield f"event: onboarding\ndata: {json.dumps({'key': next_key})}\n\n"
             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': follow_up})}\n\n"
             yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
             cancel_events.pop(request.turn_id, None)

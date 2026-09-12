@@ -17,20 +17,20 @@ export function SavedHistory({
   return (
     <details className="conversation-history">
       <summary>
-        Gesprächsverlauf{' '}
+        Conversation history{' '}
         <span>
-          {turns.length} {turns.length === 1 ? 'Nachricht' : 'Nachrichten'}
+          {turns.length} {turns.length === 1 ? 'message' : 'messages'}
         </span>
       </summary>
       <div className="history-tools">
-        <p>Die Gespräche sind auf diesem Mac gespeichert.</p>
-        <button onClick={onRefresh} aria-label="Gesprächsverlauf aktualisieren">
+        <p>Conversations are saved on this Mac.</p>
+        <button onClick={onRefresh} aria-label="Refresh conversation history">
           <RefreshCw size={16} />
         </button>
       </div>
       {loading && (
         <p className="saved-note" role="status">
-          Gespräche werden geladen …
+          Loading conversations …
         </p>
       )}
       {error && (
@@ -40,8 +40,8 @@ export function SavedHistory({
       )}
       {!loading && !error && turns.length === 0 && (
         <p className="saved-note">
-          Noch keine Gespräche gespeichert. Erzähle Sound Flux von deiner
-          Lieblingsmusik.
+          No conversations saved yet. Tell Sound Flux about your favorite
+          music.
         </p>
       )}
       <div className="history-content">
@@ -57,7 +57,7 @@ export function SavedHistory({
               {historyTime(turn.created_at)}
             </time>
             <p>
-              <strong>Du</strong>
+              <strong>You</strong>
               {turn.user}
             </p>
             <p>
@@ -69,7 +69,7 @@ export function SavedHistory({
       </div>
       <button className="manage-history" onClick={onManage}>
         <Settings2 size={16} />
-        Gespeicherte Daten verwalten
+        Manage saved data
       </button>
     </details>
   )

@@ -28,7 +28,7 @@ export class SpeechPauseDetector {
             () =>
               reject(
                 new Error(
-                  'Die Pausenerkennung konnte nicht starten. Bitte verwende die manuelle Aufnahme.',
+                  'Pause detection could not start. Please use manual recording.',
                 ),
               ),
             3_000,

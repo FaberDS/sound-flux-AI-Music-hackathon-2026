@@ -1,5 +1,5 @@
 export const states = Object.freeze(['idle', 'listening', 'thinking', 'speaking']);
-export const defaultLabels = Object.freeze({idle: 'Bereit', listening: 'Ich höre zu', thinking: 'Einen Moment', speaking: 'Ich spreche'});
+export const defaultLabels = Object.freeze({idle: 'Ready', listening: 'Listening', thinking: 'One moment', speaking: 'Speaking'});
 export const palette = Object.freeze({brown: '#693D2B', yellow: '#FFDE5A', orange: '#FE751F'});
 export const DEFAULT_WOBBLE = 0.625;
 const TAU = 2 * Math.PI;

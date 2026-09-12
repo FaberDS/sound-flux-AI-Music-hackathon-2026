@@ -26,10 +26,10 @@ export async function request(
   if (!response.ok) {
     const reason =
       response.status === 413
-        ? 'Die Aufnahme ist zu groß. Bitte nimm eine kürzere Nachricht auf.'
+        ? 'The recording is too large. Please record a shorter message.'
         : response.status === 422
-          ? 'Die Nachricht konnte nicht verarbeitet werden. Bitte versuche eine kürzere Nachricht.'
-          : 'Die Sprachbegleitung ist gerade nicht erreichbar. Bitte versuche es später noch einmal.'
+          ? 'The message could not be processed. Please try a shorter message.'
+          : 'The voice companion is unavailable right now. Please try again later.'
     throw new Error(reason)
   }
   return response
@@ -58,6 +58,8 @@ export async function streamReply(
   signal: AbortSignal,
   onToken: (text: string) => void,
   onboardingKey?: string | null,
+  onMode?: (mode: string) => void,
+  onOnboardingKey?: (key: string | null) => void,
 ) {
   const response = await request('/v1/chat', {
     method: 'POST',
@@ -72,7 +74,7 @@ export async function streamReply(
     }),
   })
   if (!response.body)
-    throw new Error('Die Antwort ist leer. Bitte versuche es noch einmal.')
+    throw new Error('The answer is empty. Please try again.')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -92,16 +94,27 @@ export async function streamReply(
     if (!data) return
     if (event === 'error')
       throw new Error(
-        'Die Antwort konnte nicht erstellt werden. Bitte versuche es später noch einmal.',
+        'The answer could not be created. Please try again later.',
       )
     if (event === 'done') {
       completed = true
       return
     }
+    if (event === 'mode') {
+      const payload = JSON.parse(data)
+      if (typeof payload.value === 'string') onMode?.(payload.value)
+      return
+    }
+    if (event === 'onboarding') {
+      const payload = JSON.parse(data)
+      if (typeof payload.key === 'string' || payload.key === null)
+        onOnboardingKey?.(payload.key)
+      return
+    }
     if (event !== 'token') return
     const payload = JSON.parse(data)
     if (typeof payload.text !== 'string')
-      throw new Error('Die Antwort konnte nicht gelesen werden.')
+      throw new Error('The answer could not be read.')
     answer += payload.text
     onToken(answer)
   }
@@ -122,7 +135,7 @@ export async function streamReply(
     if (buffer.trim()) consume(buffer)
     if (!completed || !answer.trim())
       throw new Error(
-        'Die Antwort wurde unterbrochen. Bitte versuche es noch einmal.',
+        'The answer was interrupted. Please try again.',
       )
     return answer
   } finally {

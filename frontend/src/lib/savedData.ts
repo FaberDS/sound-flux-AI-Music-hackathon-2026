@@ -3,30 +3,30 @@ import { request, type Message } from './api'
 export const profileFields = [
   {
     key: 'name',
-    label: 'Vorname',
-    question: 'Wie darf Sound Flux die Person ansprechen?',
-    placeholder: 'Vorname, optional',
+    label: 'First name',
+    question: 'What would this person like Sound Flux to call them?',
+    placeholder: 'First name, optional',
     maxLength: 80,
   },
   {
     key: 'birth_year',
-    label: 'Geburtsjahr',
-    question: 'In welchem Jahr wurde die Person geboren?',
-    placeholder: 'Zum Beispiel 1945',
+    label: 'Year of birth',
+    question: 'What year was this person born?',
+    placeholder: 'For example, 1945',
     maxLength: 4,
   },
   {
     key: 'mood',
-    label: 'Stimmung',
-    question: 'Wie geht es der Person heute?',
-    placeholder: 'Zum Beispiel ruhig oder fröhlich',
+    label: 'Mood',
+    question: 'How is this person feeling today?',
+    placeholder: 'For example, calm or cheerful',
     maxLength: 80,
   },
   {
     key: 'music_preferences',
-    label: 'Musikvorlieben',
-    question: 'Welche Musik mag die Person?',
-    placeholder: 'Zum Beispiel Klavier, Walzer oder Gitarrenmusik',
+    label: 'Music preferences',
+    question: 'What music does this person enjoy?',
+    placeholder: 'For example, piano, waltz, or guitar music',
     maxLength: 500,
   },
 ] as const
@@ -76,35 +76,39 @@ export function profileValues(profile: ProfileState | null): ProfileValues {
 }
 
 export function welcomeText(profile: ProfileState | null) {
-  if (!profile) return 'Was klingt für dich nach Freude?'
+  if (!profile) return 'What sounds like joy to you?'
   const name = profileValues(profile).name
   const greeting = profile.greeting.startsWith(
     'Welcome back after a short break',
   )
-    ? 'Schön, dass du wieder da bist'
+    ? 'It’s lovely to have you back'
     : profile.greeting.startsWith('Welcome back')
-      ? 'Willkommen zurück'
-      : 'Schön, dass du da bist'
+      ? 'Welcome back'
+      : 'It’s lovely to have you here'
   return `${greeting}${name ? `, ${name}` : ''}.`
+}
+
+export function profileQuestion(key: string, fallback: string) {
+  return (
+    {
+    name: 'What may I call you?',
+    birth_year: 'Would you like to share your year of birth?',
+    mood: 'How are you feeling today?',
+    music_preferences: 'What music do you enjoy?',
+    }[key] ?? fallback
+  )
 }
 
 export function onboardingQuestion(profile: ProfileState | null) {
   if (!profile?.onboarding) return null
-  return (
-    {
-    name: 'Wie darf ich dich nennen?',
-    birth_year: 'Magst du mir dein Geburtsjahr verraten?',
-    mood: 'Wie geht es dir heute?',
-    music_preferences: 'Welche Musik hörst du gerne?',
-    }[profile.onboarding.key] ?? profile.onboarding.question
-  )
+  return profileQuestion(profile.onboarding.key, profile.onboarding.question)
 }
 
 export async function getProfile(signal: AbortSignal): Promise<ProfileState> {
   const response = await request('/v1/profile', { signal }, 10_000)
   const data = await response.json()
   if (!Array.isArray(data.properties) || typeof data.greeting !== 'string')
-    throw new Error('Das Profil konnte nicht gelesen werden.')
+    throw new Error('The profile could not be read.')
   return data
 }
 
@@ -130,7 +134,7 @@ export async function getHistory(signal: AbortSignal): Promise<SavedTurn[]> {
   const response = await request('/v1/history', { signal }, 10_000)
   const data = await response.json()
   if (!Array.isArray(data.items))
-    throw new Error('Der Verlauf konnte nicht gelesen werden.')
+    throw new Error('The history could not be read.')
   return data.items
 }
 
@@ -172,7 +176,7 @@ export function historyTime(value: string) {
   )
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat('de-AT', {
+    : new Intl.DateTimeFormat('en-US', {
         dateStyle: 'medium',
         timeStyle: 'short',
       }).format(date)

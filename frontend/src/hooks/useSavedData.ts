@@ -34,11 +34,11 @@ export function useSavedData() {
       setErrors({
         profile:
           profileResult.status === 'rejected'
-            ? 'Die gespeicherten Angaben konnten nicht geladen werden.'
+            ? 'The saved details could not be loaded.'
             : '',
         history:
           historyResult.status === 'rejected'
-            ? 'Der gespeicherte Verlauf konnte nicht geladen werden.'
+            ? 'The saved history could not be loaded.'
             : '',
       })
       setLoading(false)
@@ -56,7 +56,7 @@ export function useSavedData() {
   function beginMutation() {
     if (mutation.current)
       throw new Error(
-        'Bitte warte, bis die laufende Änderung abgeschlossen ist.',
+        'Please wait until the current change is complete.',
       )
     read.current?.abort()
     const controller = new AbortController()

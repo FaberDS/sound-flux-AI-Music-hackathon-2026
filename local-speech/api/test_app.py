@@ -100,9 +100,31 @@ class InterruptTest(unittest.TestCase):
                 app.apply_profile_updates("I was actually born in 1922.")
                 app.record_interaction("user", "Hello")
                 state = app.profile_state()
-                self.assertEqual(state["onboarding"]["key"], "can_whistle")
+                self.assertIsNone(state["onboarding"])
                 self.assertEqual({item["key"]: item["value"] for item in state["properties"]}["birth_year"], "1922")
                 self.assertEqual(state["greeting"], "Welcome back after a short break, Ada.")
+            finally:
+                app.DB_PATH = original_path
+
+    def test_play_request_enters_play_mode_without_storing_it_as_a_name(self):
+        import tempfile
+        from pathlib import Path
+
+        async def collect_response():
+            response = await app.chat(app.ChatRequest(
+                turn_id="play-mode", message="Let's play some music", onboarding_key="name",
+            ))
+            return "".join([chunk async for chunk in response.body_iterator])
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                body = asyncio.run(collect_response())
+                self.assertIn('event: mode', body)
+                self.assertIn('"value": "play"', body)
+                self.assertEqual(app.profile_properties(), [])
             finally:
                 app.DB_PATH = original_path
 
@@ -145,6 +167,8 @@ class InterruptTest(unittest.TestCase):
                 self.assertTrue(any(question in body for question in (
                     "What year were you born?", "Which year were you born?", "what year you were born?",
                 )))
+                self.assertIn('event: onboarding', body)
+                self.assertIn('"key": "birth_year"', body)
                 self.assertEqual(app.profile_properties()[0]["value"], "Ada")
             finally:
                 app.DB_PATH = original_path

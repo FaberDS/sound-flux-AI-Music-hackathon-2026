@@ -8,6 +8,7 @@ import {
 import {
   chatContext,
   mergeTurns,
+  profileQuestion,
   type ProfileState,
   type SavedTurn,
 } from '../lib/savedData'
@@ -35,6 +36,7 @@ export function useCompanion(
   const [turns, setTurns] = useState<SavedTurn[]>([])
   const turnsRef = useRef<SavedTurn[]>([])
   const [continuous, setContinuous] = useState(false)
+  const [playMode, setPlayMode] = useState(false)
   const continuousRef = useRef(false)
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const active = useRef<Turn | null>(null)
@@ -150,7 +152,7 @@ export function useCompanion(
         cause.name !== 'TypeError' &&
         cause.name !== 'TimeoutError'
         ? cause.message
-        : 'Die Sprachbegleitung antwortet gerade nicht. Du kannst weiter auf den Instrumenten spielen.',
+        : 'The voice companion is not responding right now. You can keep playing the instruments.',
     )
   }
 
@@ -186,6 +188,12 @@ export function useCompanion(
           if (isCurrent(turn)) setAnswer(partial)
         },
         onboardingKey,
+        (mode) => {
+          if (mode === 'play') setPlayMode(true)
+        },
+        (key) => {
+          pendingOnboardingKey.current = key
+        },
       )
       if (!isCurrent(turn)) return
       turnsRef.current = [
@@ -235,7 +243,7 @@ export function useCompanion(
           if (isCurrent(turn)) {
             void stop()
             setError(
-              'Tippe auf „Antwort noch einmal hören“, um die Sprachausgabe zu starten.',
+              'Tap “Hear the answer again” to start speech playback.',
             )
           }
         }
@@ -243,7 +251,7 @@ export function useCompanion(
         if (isCurrent(turn)) {
           void stop()
           setError(
-            'Die Sprachausgabe ist gerade nicht verfügbar. Du kannst die Antwort hier lesen.',
+            'Speech playback is unavailable right now. You can read the answer here.',
           )
         }
       }
@@ -266,7 +274,7 @@ export function useCompanion(
     ) {
       fail(
         new Error(
-          'Dieser Browser kann hier nicht aufnehmen. Öffne die Seite über localhost oder HTTPS.',
+          'This browser cannot record here. Open the page through localhost or HTTPS.',
         ),
         turn,
       )
@@ -328,7 +336,7 @@ export function useCompanion(
       live.onopen = () =>
         live.send(JSON.stringify({ type: 'start', sample_rate: audioContext.sampleRate }))
       live.onerror = () =>
-        fail(new Error('Die Mikrofonverbindung wurde unterbrochen.'), turn)
+        fail(new Error('The microphone connection was interrupted.'), turn)
       live.onmessage = ({ data }) => {
         if (!isCurrent(turn)) return
         try {
@@ -336,7 +344,7 @@ export function useCompanion(
           if (message.type === 'partial' && typeof message.text === 'string')
             setTranscript(message.text)
           if (message.type === 'error')
-            fail(new Error(message.detail || 'Die Aufnahme konnte nicht verarbeitet werden.'), turn)
+            fail(new Error(message.detail || 'The recording could not be processed.'), turn)
           if (message.type === 'final') {
             const text = typeof message.text === 'string' ? message.text.trim() : ''
             if (text) void respond(text, turn)
@@ -345,7 +353,7 @@ export function useCompanion(
             else setPhase('idle')
           }
         } catch {
-          fail(new Error('Die Mikrofonantwort konnte nicht gelesen werden.'), turn)
+          fail(new Error('The microphone response could not be read.'), turn)
         }
       }
       setPhase('recording')
@@ -356,7 +364,7 @@ export function useCompanion(
           if (automatic && !heardSpeech) {
             fail(
               new Error(
-                'Ich habe keine Stimme gehört. Starte das Gespräch erneut.',
+                'I did not hear a voice. Start the conversation again.',
               ),
               turn,
             )
@@ -370,8 +378,8 @@ export function useCompanion(
       fail(
         new Error(
           denied
-            ? 'Das Mikrofon ist nicht freigegeben. Erlaube den Zugriff im Browser.'
-            : 'Kein Mikrofon verfügbar. Prüfe dein Mikrofon.',
+            ? 'The microphone is not allowed. Enable it in your browser.'
+            : 'No microphone is available. Check your microphone.',
         ),
         turn,
       )
@@ -423,7 +431,7 @@ export function useCompanion(
   ) {
     const prompt = onboarding.key === 'name'
       ? `Welcome to Sound Flux. I would like to get to know you a little better. ${onboarding.question}`
-      : onboarding.question
+      : profileQuestion(onboarding.key, onboarding.question)
     return speakBeforeListening(prompt, onboarding.key, turn)
   }
 
@@ -487,7 +495,7 @@ export function useCompanion(
     } catch {
       if (generation === playbackGeneration.current)
         setError(
-          'Die Wiedergabe konnte nicht starten. Prüfe die Audiofreigabe deines Browsers.',
+          'Playback could not start. Check your browser’s audio permission.',
         )
     }
   }
@@ -500,6 +508,7 @@ export function useCompanion(
     setTranscript('')
     setError('')
     setCanReplay(false)
+    setPlayMode(false)
     if (audioUrl.current) URL.revokeObjectURL(audioUrl.current)
     audioUrl.current = null
     player.current = null
@@ -513,6 +522,7 @@ export function useCompanion(
     canReplay,
     turns,
     continuous,
+    playMode,
     startRecording,
     startConversation,
     finishRecording,
