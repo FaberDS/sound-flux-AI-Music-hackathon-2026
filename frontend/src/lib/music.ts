@@ -8,6 +8,7 @@ export interface CompositionEffect {
   at: number
   effect: Instrument
   intensity: number
+  volume: number
   pitch: EffectPitch
 }
 
@@ -19,6 +20,35 @@ export interface SavedComposition {
   effects: CompositionEffect[]
 }
 
+export interface MusicSettings {
+  prompt: string
+  negative_prompt: string
+  seconds: number
+  strength: number
+  steps: number
+  cfg: number
+  seed: number
+  repeat: boolean
+  input_mix: number
+  match_input: boolean
+}
+
+export async function getMusicSettings() {
+  const response = await fetch('/engine/api/settings')
+  if (!response.ok) throw new Error('The music settings could not be loaded.')
+  return response.json() as Promise<MusicSettings>
+}
+
+export async function saveMusicSettings(settings: MusicSettings) {
+  const response = await fetch('/engine/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!response.ok) throw new Error('The music settings could not be saved.')
+  return response.json() as Promise<MusicSettings>
+}
+
 function isCompositionEffect(value: unknown): value is CompositionEffect {
   if (!value || typeof value !== 'object') return false
   const effect = value as Partial<CompositionEffect>
@@ -27,6 +57,7 @@ function isCompositionEffect(value: unknown): value is CompositionEffect {
     typeof effect.at === 'number' &&
     ['piano', 'guitar', 'bells', 'drum'].includes(effect.effect ?? '') &&
     typeof effect.intensity === 'number' &&
+    typeof effect.volume === 'number' &&
     (effect.pitch === 'low' || effect.pitch === 'high')
   )
 }
@@ -54,6 +85,19 @@ export async function getCompositions(signal: AbortSignal) {
       })
     return items
   }, [])
+}
+
+export async function deleteComposition(identifier: string) {
+  const response = await fetch(
+    `/engine/api/compositions/${encodeURIComponent(identifier)}`,
+    { method: 'DELETE' },
+  )
+  if (!response.ok) throw new Error('The song could not be deleted.')
+}
+
+export async function deleteAllCompositions() {
+  const response = await fetch('/engine/api/compositions', { method: 'DELETE' })
+  if (!response.ok) throw new Error('The songs could not be deleted.')
 }
 
 export async function saveCompositionEffect(
@@ -192,7 +236,7 @@ export class MusicRoom {
     )
   }
 
-  beat(effect: Instrument, intensity: number, pitch: EffectPitch) {
+  beat(effect: Instrument, intensity: number, volume: number, pitch: EffectPitch) {
     if (
       !this.context ||
       this.context.state === 'closed' ||
@@ -202,7 +246,7 @@ export class MusicRoom {
     )
       return null
     const midi = (pitch === 'high' ? 72 : 60) + (effect === 'bells' ? 12 : 0)
-    this.note(midi, effect, effect === 'drum' ? 0.4 : 1.2, 0.12 + 0.2 * intensity)
+    this.note(midi, effect, effect === 'drum' ? 0.4 : 1.2, (0.2 + 0.45 * intensity) * volume)
     return (this.context.currentTime - this.loopStartedAt) % this.loopDuration
   }
 

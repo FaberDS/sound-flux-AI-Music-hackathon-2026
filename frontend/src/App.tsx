@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  ArrowLeft,
   ArrowRight,
   AudioLines,
   BellRing,
@@ -16,6 +17,7 @@ import {
   Drum,
   Guitar,
   Heart,
+  ListMusic,
   LoaderCircle,
   Mic,
   Music2,
@@ -24,6 +26,7 @@ import {
   Play,
   ShieldCheck,
   Square,
+  Trash2,
   Users,
   Volume2,
   VolumeX,
@@ -31,14 +34,19 @@ import {
 } from 'lucide-react'
 import { checkConnection, preseedOnboarding } from './lib/api'
 import {
+  deleteAllCompositions,
+  deleteComposition,
   deleteCompositionEffect,
   getCompositions,
+  getMusicSettings,
   MusicRoom,
   saveCompositionEffect,
+  saveMusicSettings,
   type CapturePhase,
   type EffectPitch,
   type Instrument,
   type Mood,
+  type MusicSettings,
   type SavedComposition,
 } from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
@@ -100,10 +108,11 @@ const amazingGraceImages = [
 ]
 
 function compositionArtwork(identifier: string) {
-  const seed = Number(identifier.split('-').at(-1))
-  return amazingGraceImages[
-    Number.isSafeInteger(seed) ? seed % amazingGraceImages.length : 0
-  ]
+  const seed = Array.from(identifier).reduce(
+    (total, character) => total + character.charCodeAt(0),
+    0,
+  )
+  return amazingGraceImages[seed % amazingGraceImages.length]
 }
 
 const debugPhaseText: Record<Phase, string> = {
@@ -227,37 +236,63 @@ function CompositionTimeline({
       className="composition-timeline"
       aria-label={`Composition timeline with ${composition.effects.length} mouth ${composition.effects.length === 1 ? 'effect' : 'effects'}`}
     >
-      <span>0:00</span>
-      <div className="timeline-track">
-        {composition.effects.map((effect) => {
-          const option = instruments.find(({ id }) => id === effect.effect)
-          const Icon = option?.icon ?? Drum
-          return (
-            <span
-              key={effect.id}
-              className={`timeline-effect instrument-${effect.effect}`}
-              style={{ left: `${Math.max(2, Math.min(98, effect.at / composition.duration * 100))}%` }}
-              title={`${option?.name ?? 'Effect'}, ${effect.pitch} pitch, ${Math.round(effect.intensity * 100)}% intensity at ${time(effect.at)}`}
-            >
-              <Icon size={18} aria-hidden="true" />
-              <button
-                type="button"
-                className="timeline-remove"
-                aria-label={`Remove ${option?.name ?? 'effect'} at ${time(effect.at)}`}
-                onClick={() => onRemove(effect.id)}
+      <div className="timeline-scale" aria-hidden="true">
+        <span>0:00</span>
+        <div className="timeline-track">
+          {composition.effects.map((effect) => {
+            const option = instruments.find(({ id }) => id === effect.effect)
+            const Icon = option?.icon ?? Drum
+            return (
+              <span
+                key={effect.id}
+                className={`timeline-effect instrument-${effect.effect}`}
+                style={{ left: `${Math.max(2, Math.min(98, effect.at / composition.duration * 100))}%` }}
+                title={`${option?.name ?? 'Effect'}, ${effect.pitch} pitch, ${Math.round(effect.intensity * 100)}% intensity, ${Math.round(effect.volume * 100)}% volume at ${time(effect.at)}`}
               >
-                <X size={12} />
-              </button>
-            </span>
-          )
-        })}
+                <Icon size={18} />
+              </span>
+            )
+          })}
+        </div>
+        <span>{time(composition.duration)}</span>
       </div>
-      <span>{time(composition.duration)}</span>
+      {composition.effects.length > 0 && (
+        <ul className="timeline-effect-list">
+          {composition.effects.map((effect) => {
+            const option = instruments.find(({ id }) => id === effect.effect)
+            const Icon = option?.icon ?? Drum
+            return (
+              <li key={effect.id}>
+                <span className={`timeline-effect-icon instrument-${effect.effect}`}>
+                  <Icon size={20} aria-hidden="true" />
+                </span>
+                <span className="timeline-effect-details">
+                  <strong>{option?.name ?? 'Effect'}</strong>
+                  <span>
+                    {time(effect.at)} · {effect.pitch} pitch · {Math.round(effect.intensity * 100)}% intensity · {Math.round(effect.volume * 100)}% volume
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="timeline-remove"
+                  aria-label={`Remove ${option?.name ?? 'effect'} at ${time(effect.at)}`}
+                  onClick={() => onRemove(effect.id)}
+                >
+                  <X size={18} aria-hidden="true" /> Remove
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }
 
 export default function App({ debug = false }: { debug?: boolean }) {
+  const [page, setPage] = useState<'home' | 'songs'>(() =>
+    window.location.pathname === '/songs' ? 'songs' : 'home',
+  )
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
@@ -271,6 +306,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
     'checking' | 'online' | 'offline'
   >('checking')
   const [musicError, setMusicError] = useState('')
+  const [musicSettings, setMusicSettings] = useState<MusicSettings | null>(null)
+  const [musicSettingsStatus, setMusicSettingsStatus] = useState('Loading music settings…')
   const [seeding, setSeeding] = useState(false)
   const [amazingGraceImage] = useState(
     () => amazingGraceImages[Math.floor(Math.random() * amazingGraceImages.length)],
@@ -286,6 +323,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [styleReady, setStyleReady] = useState(false)
   const [music] = useState(() => new MusicRoom())
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const musicSettingsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const musicSettingsVersion = useRef(0)
   const healthRequest = useRef<AbortController | null>(null)
   const compositionsRequest = useRef<AbortController | null>(null)
   const handledMusicRequest = useRef(0)
@@ -373,6 +412,30 @@ export default function App({ debug = false }: { debug?: boolean }) {
     return () => compositionsRequest.current?.abort()
   }, [refreshCompositions])
   useEffect(() => {
+    if (!debug) return
+    let active = true
+    void getMusicSettings().then(
+      (settings) => {
+        if (active) {
+          setMusicSettings(settings)
+          setMusicSettingsStatus('Loaded saved defaults.')
+        }
+      },
+      () => {
+        if (active) setMusicSettingsStatus('Music engine unavailable. Reload to try again.')
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [debug])
+  useEffect(() => {
+    const showCurrentPage = () =>
+      setPage(window.location.pathname === '/songs' ? 'songs' : 'home')
+    window.addEventListener('popstate', showCurrentPage)
+    return () => window.removeEventListener('popstate', showCurrentPage)
+  }, [])
+  useEffect(() => {
     music.setVolume(volume)
   }, [music, volume])
   useEffect(
@@ -415,7 +478,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
           }
         },
       )
-    }, 4_000)
+    }, musicRequest === 1 ? 2_000 : 500)
     return () => {
       active = false
       clearTimeout(timer)
@@ -438,13 +501,14 @@ export default function App({ debug = false }: { debug?: boolean }) {
     },
     [music],
   )
-  const beat = useCallback((effect: Instrument, intensity: number, pitch: EffectPitch) => {
-    const at = music.beat(effect, intensity, pitch)
+  const beat = useCallback((effect: Instrument, intensity: number, volume: number, pitch: EffectPitch) => {
+    const at = music.beat(effect, intensity, volume, pitch)
     if (at === null || !activeCompositionId) return
     void saveCompositionEffect(activeCompositionId, {
       at,
       effect,
       intensity,
+      volume,
       pitch,
     }).then(
       ({ effects, duration }) => {
@@ -542,6 +606,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     setPlaying(false)
     void companion.stop()
     setActiveCompositionId(composition.id)
+    navigatePage('home')
     try {
       setPlaying(Boolean(await music.playComposition(composition.url)))
       setMusicError('')
@@ -549,6 +614,34 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setActiveCompositionId(null)
       setMusicError('The saved composition could not be played.')
     }
+  }
+  async function removeComposition(composition: SavedComposition) {
+    if (!window.confirm('Delete this song from this Mac? This cannot be undone.')) return
+    try {
+      await deleteComposition(composition.id)
+      if (activeCompositionId === composition.id) stopAll()
+      setCompositions((items) => items.filter((item) => item.id !== composition.id))
+      setMusicError('')
+    } catch {
+      setMusicError('The song could not be deleted. Please try again.')
+    }
+  }
+  async function removeAllCompositions() {
+    if (!window.confirm('Delete all songs from this Mac? This cannot be undone.')) return
+    try {
+      await deleteAllCompositions()
+      stopAll()
+      setCompositions([])
+      setMusicError('')
+    } catch {
+      setMusicError('The songs could not be deleted. Please try again.')
+    }
+  }
+  function navigatePage(next: 'home' | 'songs') {
+    const path = next === 'songs' ? '/songs' : '/'
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setPage(next)
+    window.scrollTo({ top: 0 })
   }
   async function chooseMood(next: Mood) {
     setMood(next)
@@ -622,6 +715,30 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
 
+  function updateMusicSetting<Key extends keyof MusicSettings>(
+    key: Key,
+    value: MusicSettings[Key],
+  ) {
+    if (!musicSettings) return
+    const next = { ...musicSettings, [key]: value }
+    const version = ++musicSettingsVersion.current
+    setMusicSettings(next)
+    setMusicSettingsStatus('Saving…')
+    if (musicSettingsTimer.current) clearTimeout(musicSettingsTimer.current)
+    musicSettingsTimer.current = setTimeout(() => {
+      void saveMusicSettings(next).then(
+        () => {
+          if (version === musicSettingsVersion.current)
+            setMusicSettingsStatus('Saved for the next composition.')
+        },
+        () => {
+          if (version === musicSettingsVersion.current)
+            setMusicSettingsStatus('Could not save music settings.')
+        },
+      )
+    }, 400)
+  }
+
   if (debug) {
     return (
       <main className="debug-page">
@@ -651,6 +768,137 @@ export default function App({ debug = false }: { debug?: boolean }) {
           {companion.transcript && <p>You: {companion.transcript}</p>}
           {companion.answer && <p>Companion: {companion.answer}</p>}
           {companion.error && <p>{companion.error}</p>}
+        </section>
+        <section>
+          <h2>Composition defaults</h2>
+          <p>Changes save automatically and apply to the next composition.</p>
+          {musicSettings && (
+            <form className="debug-music-settings" onSubmit={(event) => event.preventDefault()}>
+              <label className="wide">
+                <span>Music description</span>
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  value={musicSettings.prompt}
+                  onChange={(event) => updateMusicSetting('prompt', event.currentTarget.value)}
+                />
+                <small>Describe the instruments, mood, rhythm, and production style.</small>
+              </label>
+              <label className="wide">
+                <span>What to avoid</span>
+                <textarea
+                  rows={2}
+                  maxLength={2000}
+                  value={musicSettings.negative_prompt}
+                  onChange={(event) => updateMusicSetting('negative_prompt', event.currentTarget.value)}
+                />
+                <small>For example: vocals, speech, distortion, noise.</small>
+              </label>
+              <label htmlFor="music-strength">
+                <span>Transformation strength <output>{musicSettings.strength.toFixed(2)}</output></span>
+                <input
+                  id="music-strength"
+                  type="range"
+                  min="0.1"
+                  max="0.95"
+                  step="0.05"
+                  value={musicSettings.strength}
+                  onChange={(event) => updateMusicSetting('strength', event.currentTarget.valueAsNumber)}
+                />
+                <small>0.40 keeps the hum · 0.55 balanced · 0.70 more creative</small>
+              </label>
+              <label htmlFor="music-input-mix">
+                <span>Original hum mix <output>{musicSettings.input_mix.toFixed(2)}</output></span>
+                <input
+                  id="music-input-mix"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={musicSettings.input_mix}
+                  onChange={(event) => updateMusicSetting('input_mix', event.currentTarget.valueAsNumber)}
+                />
+                <small>Mixes the raw recording back in; 0.00–0.30 is usually useful.</small>
+              </label>
+              <label htmlFor="music-cfg">
+                <span>Prompt guidance <output>{musicSettings.cfg.toFixed(1)}</output></span>
+                <input
+                  id="music-cfg"
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="0.1"
+                  value={musicSettings.cfg}
+                  onChange={(event) => updateMusicSetting('cfg', event.currentTarget.valueAsNumber)}
+                />
+                <small>2–4 is a practical range; higher values follow the prompt harder.</small>
+              </label>
+              <label htmlFor="music-steps">
+                <span>Generation steps <output>{musicSettings.steps}</output></span>
+                <input
+                  id="music-steps"
+                  type="range"
+                  min="1"
+                  max="32"
+                  step="1"
+                  value={musicSettings.steps}
+                  onChange={(event) => updateMusicSetting('steps', event.currentTarget.valueAsNumber)}
+                />
+                <small>8 is fast · 12 may sound more refined · more is slower.</small>
+              </label>
+              <label htmlFor="music-seconds">
+                <span>Length <output>{musicSettings.seconds} s</output></span>
+                <input
+                  id="music-seconds"
+                  type="range"
+                  min="5"
+                  max="60"
+                  step="1"
+                  value={musicSettings.seconds}
+                  disabled={musicSettings.match_input}
+                  onChange={(event) => updateMusicSetting('seconds', event.currentTarget.valueAsNumber)}
+                />
+                <small>Ignored while “match recorded length” is enabled.</small>
+              </label>
+              <label>
+                <span>Seed</span>
+                <input
+                  type="number"
+                  min="-1"
+                  max="2147483647"
+                  step="1"
+                  defaultValue={musicSettings.seed}
+                  onChange={(event) => {
+                    const value = event.currentTarget.valueAsNumber
+                    if (Number.isInteger(value) && value >= -1 && value <= 2_147_483_647)
+                      updateMusicSetting('seed', value)
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.validity.valid)
+                      event.currentTarget.value = String(musicSettings.seed)
+                  }}
+                />
+                <small>Keep fixed for comparisons; use −1 for a new variation each time.</small>
+              </label>
+              <label className="check wide">
+                <input
+                  type="checkbox"
+                  checked={musicSettings.match_input}
+                  onChange={(event) => updateMusicSetting('match_input', event.currentTarget.checked)}
+                />
+                <span>Match the composition length to the recording</span>
+              </label>
+              <label className="check wide">
+                <input
+                  type="checkbox"
+                  checked={musicSettings.repeat}
+                  onChange={(event) => updateMusicSetting('repeat', event.currentTarget.checked)}
+                />
+                <span>Repeat a short hum to fill a longer composition</span>
+              </label>
+            </form>
+          )}
+          <p className="debug-settings-status" role="status">{musicSettingsStatus}</p>
         </section>
         <section>
           <h2>Your profile</h2>
@@ -695,9 +943,13 @@ export default function App({ debug = false }: { debug?: boolean }) {
       </a>
       <header className="site-header">
         <a
-          href="#musikraum"
+          href="/"
           aria-label="Sound Flux, music room"
           className="brand"
+          onClick={(event) => {
+            event.preventDefault()
+            navigatePage('home')
+          }}
         >
           <span className="brand-icon">
             <AudioLines size={27} strokeWidth={2.4} />
@@ -721,6 +973,64 @@ export default function App({ debug = false }: { debug?: boolean }) {
           <ChevronRight size={16} />
         </button>
       </header>
+      {page === 'songs' ? (
+        <main id="musikraum" className="main-content songs-page">
+          <button className="songs-back" onClick={() => navigatePage('home')}>
+            <ArrowLeft size={20} /> Back to music
+          </button>
+          <div className="songs-heading">
+            <div>
+              <p>Your music library</p>
+              <h1>YOUR SONGS</h1>
+              <span>Play the music you created with Sound Flux.</span>
+            </div>
+            {compositions.length > 0 && (
+              <button className="delete-all-songs" onClick={() => void removeAllCompositions()}>
+                <Trash2 size={18} /> Delete all songs
+              </button>
+            )}
+          </div>
+          {musicError && <p className="error-message" role="alert">{musicError}</p>}
+          {compositions.length > 0 ? (
+            <div className="songs-grid">
+              {compositions.map((composition) => {
+                const name = `Composition — ${historyTime(composition.created_at)}`
+                return <article className="song-card" key={composition.id}>
+                  <button
+                    className="song-play"
+                    onClick={() => void playSavedComposition(composition)}
+                    aria-label={`Play ${name}`}
+                  >
+                    <img src={compositionArtwork(composition.id)} alt="" />
+                    <span className="song-play-icon"><Play size={24} fill="currentColor" /></span>
+                  </button>
+                  <div className="song-details">
+                    <div>
+                      <strong>{name}</strong>
+                      <time dateTime={composition.created_at}>{historyTime(composition.created_at)}</time>
+                    </div>
+                    <button
+                      className="delete-song"
+                      onClick={() => void removeComposition(composition)}
+                      aria-label={`Delete ${name}`}
+                    >
+                      <Trash2 size={19} />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                </article>
+              })}
+            </div>
+          ) : (
+            <div className="songs-empty">
+              <ListMusic size={38} />
+              <h2>No songs yet</h2>
+              <p>Create music with Sound Flux and it will appear here.</p>
+              <button className="music-button" onClick={() => navigatePage('home')}>Create music</button>
+            </div>
+          )}
+        </main>
+      ) : (
       <main id="musikraum" className="main-content">
         <section className="hero-grid" aria-labelledby="page-title">
           <div className="hero-copy">
@@ -749,6 +1059,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 </button>
               </div>
             </fieldset>
+            {compositions.length > 0 && (
+              <button className="songs-link-button" onClick={() => navigatePage('songs')}>
+                <ListMusic size={21} /> Your songs
+                <span>{compositions.length}</span>
+              </button>
+            )}
             <button
               className="music-button"
               onClick={() => void toggleMusic()}
@@ -791,10 +1107,14 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   type="button"
                   className={`camera-permission ${cameraEnabled ? 'online' : ''}`}
                   aria-pressed={cameraEnabled}
+                  aria-label={cameraEnabled ? 'Turn camera off' : 'Enable camera'}
                   onClick={() => setCameraEnabled(!cameraEnabled)}
                 >
-                  {cameraEnabled ? <CameraOff size={20} /> : <Camera size={20} />}
-                  {cameraEnabled ? 'Camera on' : 'Enable camera'}
+                  {cameraEnabled ? <Camera size={22} /> : <CameraOff size={22} />}
+                  <span className="camera-copy">
+                    <strong>{cameraEnabled ? 'Camera on' : 'Camera off'}</strong>
+                    <span>{cameraEnabled ? 'Turn camera off' : 'Enable camera'}</span>
+                  </span>
                 </button>
               )}
             </div>
@@ -876,7 +1196,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
                     {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                     {playing ? 'Pause music' : 'Play music'}
                   </button>
-                  <button onClick={stopAll}>Back to your songs</button>
+                  <button onClick={() => {
+                    stopAll()
+                    navigatePage('songs')
+                  }}>Back to your songs</button>
                 </div>
                 <CompositionTimeline
                   composition={activeComposition}
@@ -1000,33 +1323,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
             )}
           </div>
         </section>
-        {compositions.length > 0 && (
-          <section className="compositions-section" aria-labelledby="compositions-title">
-            <div className="section-heading">
-              <h2 id="compositions-title">YOUR COMPOSITIONS</h2>
-              <p>Tap a song to play it with its artwork.</p>
-            </div>
-            <div className="composition-grid">
-              {compositions.map((composition) => (
-                <button
-                  key={composition.id}
-                  className="composition-card"
-                  onClick={() => void playSavedComposition(composition)}
-                  aria-label={`Play composition from ${historyTime(composition.created_at)}`}
-                >
-                  <img src={compositionArtwork(composition.id)} alt="" />
-                  <span>
-                    <strong>Your composition</strong>
-                    <time dateTime={composition.created_at}>
-                      {historyTime(composition.created_at)}
-                    </time>
-                  </span>
-                  <Play size={19} fill="currentColor" aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
         <SavedHistory
           turns={history}
           loading={saved.loading}
@@ -1065,6 +1361,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
           </div>
         </div>
       </main>
+      )}
       {(playing || busy) && (
         <button
           className="immediate-stop"

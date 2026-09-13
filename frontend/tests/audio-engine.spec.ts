@@ -50,11 +50,15 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   )
   await mockSavedApi(page)
   await page.route('**/engine/api/compositions/*', (route) =>
-    route.fulfill({ contentType: 'audio/wav', body: wav() }),
+    route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ contentType: 'audio/wav', body: wav() }),
   )
   await page.route('**/engine/api/compositions', (route) =>
-    route.fulfill({
-      json: [{
+    route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({
+        json: [{
         id: '20260913T123456123456Z-42',
         created_at: '2026-09-13T12:34:56Z',
         duration: 2,
@@ -63,17 +67,44 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
           at: 0.5,
           effect: 'piano',
           intensity: 0.8,
+          volume: 0.6,
           pitch: 'high',
         }],
+      }, {
+        id: '20260913T123457123456Z-43',
+        created_at: '2026-09-13T12:35:57Z',
+        duration: 2,
+        effects: [],
       }],
-    }),
+      }),
   )
   await page.route('**/engine/api/compositions/*/effects/*', (route) =>
     route.fulfill({ json: { duration: 2, effects: [] } }),
   )
 
   await page.goto('/')
-  await page.getByRole('button', { name: /Play composition from/ }).click()
+  const songsButton = page.getByRole('button', { name: /Your songs/ })
+  await expect(songsButton).toBeVisible()
+  expect((await songsButton.boundingBox())!.y).toBeLessThan(
+    (await page.getByRole('button', { name: 'Start music' }).boundingBox())!.y,
+  )
+  await songsButton.click()
+  await expect(page).toHaveURL(/\/songs$/)
+  await expect(page.getByRole('heading', { name: 'YOUR SONGS' })).toBeVisible()
+  await expect(page.locator('.song-card')).toHaveCount(2)
+  const names = await page.locator('.song-details strong').allTextContents()
+  expect(new Set(names).size).toBe(2)
+  for (const name of names) {
+    await expect(page.getByRole('button', { name: `Play ${name}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: `Delete ${name}` })).toContainText('Delete')
+  }
+  expect(await page.locator('.song-card img').evaluateAll((images) =>
+    new Set(images.map((image) => image.getAttribute('src'))).size,
+  )).toBe(2)
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: /Delete Composition/ }).last().click()
+  await expect(page.locator('.song-card')).toHaveCount(1)
+  await page.getByRole('button', { name: /Play Composition/ }).click()
   const cameraAlert = page.getByRole('alertdialog', {
     name: 'Add effects with your mouth?',
   })
@@ -89,23 +120,43 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Enable camera' })).toBeVisible()
   const timeline = page.getByLabel('Composition timeline with 1 mouth effect')
   await expect(timeline).toBeVisible()
-  await timeline.locator('.timeline-effect').hover()
-  await page.getByRole('button', { name: 'Remove Piano at 0:00' }).click()
-  await expect(page.getByLabel('Composition timeline with 0 mouth effects')).toBeVisible()
-  await expect(page.getByLabel('Effect', { exact: true })).toHaveValue('drum')
-  await expect(page.getByRole('group', { name: 'Pitch' })).toBeVisible()
+  await expect(timeline.locator('.timeline-effect')).toHaveAttribute('title', /60% volume/)
+  const removeEffect = page.getByRole('button', { name: 'Remove Piano at 0:00' })
+  await expect(removeEffect).toBeVisible()
+  expect((await removeEffect.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  await page.setViewportSize({ width: 320, height: 1000 })
+  await expect(timeline.locator('.timeline-scale')).toBeHidden()
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(320)
+  await page.setViewportSize({ width: 1440, height: 1000 })
   const mouthControls = await page
     .getByRole('region', { name: 'Mouth beatbox' })
     .boundingBox()
+  const timelineBox = await timeline.boundingBox()
   expect(mouthControls).not.toBeNull()
+  expect(timelineBox).not.toBeNull()
+  expect(mouthControls!.y + mouthControls!.height).toBeLessThanOrEqual(timelineBox!.y)
+  expect(Math.abs(mouthControls!.width - timelineBox!.width)).toBeLessThan(1)
   expect(mouthControls!.y + mouthControls!.height).toBeLessThanOrEqual(1000)
+  await removeEffect.click()
+  await expect(page.getByLabel('Composition timeline with 0 mouth effects')).toBeVisible()
+  await expect(page.getByLabel('Effect', { exact: true })).toHaveValue('drum')
+  await expect(
+    page.getByRole('region', { name: 'Mouth beatbox' }).getByRole('slider', { name: 'Effect volume' }),
+  ).toHaveValue('1')
+  await expect(page.getByRole('group', { name: 'Pitch' })).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Voice companion' })
       .getByRole('button', { name: 'Pause music' }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Back to your songs' }).click()
-  await page.getByRole('button', { name: /Play composition from/ }).click()
-  await expect(cameraAlert).toHaveCount(0)
+  await expect(page).toHaveURL(/\/songs$/)
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Delete all songs' }).click()
+  await expect(page.getByRole('heading', { name: 'No songs yet' })).toBeVisible()
+  await page.getByRole('button', { name: 'Back to music' }).click()
+  await expect(page.getByRole('button', { name: /Your songs/ })).toHaveCount(0)
 })
 
 test('prepares music, then records the hum before composing', async ({ page }) => {
@@ -217,6 +268,7 @@ test('prepares music, then records the hum before composing', async ({ page }) =
     return route.fulfill({ contentType: 'audio/wav', body: wav() })
   })
   await page.goto('/')
+  const firstStartedAt = Date.now()
   await page.getByRole('button', { name: 'Talk with Sound Flux' }).click()
   await expect(
     page.getByText('Preparing your style of music'),
@@ -224,10 +276,15 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   await expect(page.getByRole('img', { name: 'Music artwork' })).toHaveCount(0)
   await expect(page.getByRole('img', { name: 'Music artwork' })).toBeVisible({ timeout: 5_000 })
   await expect(page.getByRole('button', { name: 'Humming…' })).toBeVisible()
+  expect(Date.now() - firstStartedAt).toBeLessThan(3_000)
   await expect(
     page.getByRole('region', { name: 'Voice companion' }),
   ).toHaveClass(/session-active/)
   await expect.poll(() => uploads).toBe(1)
   expect(body).toContain('name="audio"')
   await expect(page.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  const repeatStartedAt = Date.now()
+  await page.getByRole('button', { name: 'Talk with Sound Flux' }).click()
+  await expect(page.getByRole('button', { name: 'Humming…' })).toBeVisible()
+  expect(Date.now() - repeatStartedAt).toBeLessThan(1_500)
 })

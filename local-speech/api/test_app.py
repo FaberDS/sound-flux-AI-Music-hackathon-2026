@@ -1,7 +1,12 @@
 import asyncio
+import io
 import json
 import time
 import unittest
+import wave
+from types import SimpleNamespace
+
+import numpy as np
 
 import app
 from fastapi.testclient import TestClient
@@ -16,6 +21,18 @@ class FakeProcess:
 
 
 class InterruptTest(unittest.TestCase):
+    def test_tts_adds_two_second_pause_between_paragraphs(self):
+        class Model:
+            def generate(self, text, **_options):
+                yield SimpleNamespace(audio=np.ones(4), sample_rate=8)
+
+        audio = app.synthesize_tts(Model(), "Question?\n\nHum a melody.", "voice")
+        with wave.open(io.BytesIO(audio)) as wav:
+            samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
+
+        self.assertEqual(len(samples), 4 + 16 + 4)
+        self.assertTrue(np.all(samples[4:20] == 0))
+
     def test_interrupt_terminates_active_tts(self):
         turn_id = "test-turn"
         process = FakeProcess()
@@ -167,7 +184,12 @@ class InterruptTest(unittest.TestCase):
                 app.DB_PATH = Path(directory) / "profile.db"
                 app.initialize_database()
                 body = asyncio.run(collect_response())
-                self.assertIn("Let's play some music.", body)
+                self.assertIn("Hum a melody for me.", body)
+                self.assertTrue(any(question in body for question in (
+                    "What does this picture remind you of?",
+                    "What memories come to mind when you see this picture?",
+                    "Does this picture bring back a special memory?",
+                )))
                 self.assertIn('event: mode', body)
                 self.assertLess(body.index('event: mode'), body.index('event: done'))
             finally:

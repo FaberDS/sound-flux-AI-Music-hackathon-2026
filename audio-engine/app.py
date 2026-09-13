@@ -115,6 +115,15 @@ def effects_path(identifier: str):
     return COMPOSITIONS / f"{identifier}.effects.json"
 
 
+def delete_composition_files(identifier: str):
+    for path in (
+        composition_path(identifier),
+        base_composition_path(identifier),
+        effects_path(identifier),
+    ):
+        path.unlink(missing_ok=True)
+
+
 def composition_effects(identifier: str):
     try:
         values = json.loads(effects_path(identifier).read_text())
@@ -123,7 +132,7 @@ def composition_effects(identifier: str):
     if not isinstance(values, list):
         return []
     return [
-        value for value in values
+        value | {"volume": float(value.get("volume", 1))} for value in values
         if isinstance(value, dict)
         and isinstance(value.get("id"), str)
         and isinstance(value.get("at"), (int, float))
@@ -134,6 +143,10 @@ def composition_effects(identifier: str):
         and not isinstance(value.get("intensity"), bool)
         and math.isfinite(value["intensity"])
         and 0.1 <= value["intensity"] <= 1
+        and isinstance(value.get("volume", 1), (int, float))
+        and not isinstance(value.get("volume", 1), bool)
+        and math.isfinite(value.get("volume", 1))
+        and 0 <= value.get("volume", 1) <= 1
         and value.get("pitch") in {"low", "high"}
     ]
 
@@ -159,7 +172,7 @@ def render_composition_effects(identifier: str, effects: list[dict]):
         wave = (2 / np.pi) * np.arcsin(np.sin(phase)) if instrument == "guitar" else np.sin(phase)
         if instrument == "bells":
             wave += 0.18 * np.sin(phase * 2.76)
-        strength = 0.12 + 0.2 * effect["intensity"]
+        strength = (0.12 + 0.2 * effect["intensity"]) * effect["volume"]
         envelope = np.minimum(time / 0.012, 1) * np.exp(-7 * time / sound_length) * strength
         start = round(effect["at"] * rate)
         samples[(start + np.arange(length)) % len(samples)] += (wave * envelope)[:, None]
@@ -222,6 +235,19 @@ def compositions():
     ]
 
 
+@app.delete("/api/compositions", status_code=204)
+def delete_compositions():
+    with composition_lock:
+        identifiers = [
+            path.stem
+            for path in COMPOSITIONS.glob("*.wav")
+            if re.fullmatch(r"[0-9]{8}T[0-9]{12}Z-[0-9]+", path.stem)
+        ]
+        for identifier in identifiers:
+            delete_composition_files(identifier)
+    return Response(status_code=204)
+
+
 @app.get("/api/compositions/{identifier}", name="composition")
 def composition(identifier: str):
     path = composition_path(identifier)
@@ -230,12 +256,23 @@ def composition(identifier: str):
     return FileResponse(path, media_type="audio/wav", filename=path.name)
 
 
+@app.delete("/api/compositions/{identifier}", status_code=204)
+def delete_composition(identifier: str):
+    path = composition_path(identifier)
+    with composition_lock:
+        if not path.is_file():
+            raise HTTPException(404, "Composition not found.")
+        delete_composition_files(identifier)
+    return Response(status_code=204)
+
+
 @app.post("/api/compositions/{identifier}/effects")
 async def add_composition_effect(identifier: str, request: Request):
     try:
         body = await request.json()
         at = body["at"]
         intensity = body["intensity"]
+        volume = body.get("volume", 1)
         if (
             isinstance(at, bool)
             or not isinstance(at, (int, float))
@@ -245,11 +282,15 @@ async def add_composition_effect(identifier: str, request: Request):
             or not isinstance(intensity, (int, float))
             or not math.isfinite(intensity)
             or not 0.1 <= intensity <= 1
+            or isinstance(volume, bool)
+            or not isinstance(volume, (int, float))
+            or not math.isfinite(volume)
+            or not 0 <= volume <= 1
             or body["pitch"] not in {"low", "high"}
         ):
             raise ValueError
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, "Choose a valid effect, intensity, pitch, and timestamp.") from exc
+        raise HTTPException(400, "Choose a valid effect, intensity, volume, pitch, and timestamp.") from exc
     path = composition_path(identifier)
     if not path.is_file():
         raise HTTPException(404, "Composition not found.")
@@ -266,6 +307,7 @@ async def add_composition_effect(identifier: str, request: Request):
                 "at": float(at),
                 "effect": body["effect"],
                 "intensity": float(intensity),
+                "volume": float(volume),
                 "pitch": body["pitch"],
             },
         ]

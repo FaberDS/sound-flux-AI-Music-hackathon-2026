@@ -15,6 +15,31 @@ async function mockApi(page: Page) {
   return mockSavedApi(page)
 }
 
+test('homepage states stay visible and reflow at 320px', async ({ page }) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 320, height: 1000 })
+  await page.goto('/')
+
+  const calm = page.getByRole('button', { name: 'Calm' })
+  await expect(calm).toHaveAttribute('aria-pressed', 'true')
+  expect(await calm.evaluate((button) => getComputedStyle(button).borderTopColor))
+    .toBe('rgb(148, 134, 120)')
+
+  const help = page.getByRole('button', { name: 'How it works' })
+  expect(await help.evaluate((button) => getComputedStyle(button).textDecorationLine))
+    .toContain('underline')
+  await help.focus()
+  expect(await help.evaluate((button) => getComputedStyle(button).outlineWidth))
+    .toBe('4px')
+
+  const voice = page.getByRole('region', { name: 'Voice companion' })
+  await expect(voice).toBeVisible()
+  expect(await voice.evaluate((region) => getComputedStyle(region).borderTopColor))
+    .toBe('rgb(148, 134, 120)')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320)
+})
+
 test('offline music, instruments and stop work without the speech API', async ({
   page,
 }) => {

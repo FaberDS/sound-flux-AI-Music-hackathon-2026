@@ -38,6 +38,7 @@ DEFAULT_TTS_MODEL = os.getenv("TTS_MODEL", "mlx-community/Kokoro-82M-8bit")
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 LIVE_WINDOW_SECONDS = 4
 LIVE_TRANSCRIPTION_TIMEOUT_SECONDS = 45
+TTS_PARAGRAPH_PAUSE_SECONDS = 2
 DB_PATH = Path(os.getenv("PROFILE_DB", Path(__file__).with_name("sound_flux.db")))
 ONBOARDING_QUESTIONS = (
     ("name", "Name", "Personal", "What should I call you?"),
@@ -67,6 +68,11 @@ The current year is 2026.
 Use only known preferences and never infer medical facts. Answer the user's actual request first.
 Profile questions are optional: never demand missing details; invite at most one when it fits naturally.
 If interrupted, stop. Answer in one short sentence, at most 18 words."""
+PLAY_MODE_PROMPTS = (
+    "Wonderful. Let's play some music. What does this picture remind you of?\n\nHum a melody for me.",
+    "Wonderful. Let's play some music. What memories come to mind when you see this picture?\n\nHum a melody for me.",
+    "Wonderful. Let's play some music. Does this picture bring back a special memory?\n\nHum a melody for me.",
+)
 ONBOARDING_FOLLOW_UPS = {
     "name": (
         "Thank you, {name}. What year were you born?",
@@ -74,24 +80,30 @@ ONBOARDING_FOLLOW_UPS = {
         "Thank you, {name}. May I ask what year you were born?",
     ),
     "birth_year": "What music do you enjoy?",
-    "music_preferences": "Wonderful. Let's play some music.",
+    "music_preferences": PLAY_MODE_PROMPTS,
 }
 MEMORABLE_ITEM_QUESTION = {"key": "memorable_item", "label": "Memorable item", "category": "Memories", "question": "What would you like to remember: a person, a song, or a movie?"}
 PLAY_MODE_EVENT = f"event: mode\ndata: {json.dumps({'value': 'play'})}\n\n"
 
 
 def synthesize_tts(model, text: str, voice: str) -> bytes:
-    result = next(iter(model.generate(
-        text=text, voice=voice, speed=1.0, lang_code="en", temperature=0.7,
+    results = [next(iter(model.generate(
+        text=paragraph, voice=voice, speed=1.0, lang_code="en", temperature=0.7,
         verbose=False, stream=False, streaming_interval=2.0, instruct=None,
         use_zero_spk_emb=False, max_tokens=1200,
-    )))
-    pcm = (np.clip(np.asarray(result.audio), -1, 1) * 32767).astype("<i2")
+    ))) for paragraph in text.split("\n\n")]
+    sample_rate = results[0].sample_rate
+    chunks = []
+    for index, result in enumerate(results):
+        if index:
+            chunks.append(np.zeros(sample_rate * TTS_PARAGRAPH_PAUSE_SECONDS))
+        chunks.append(np.asarray(result.audio))
+    pcm = (np.clip(np.concatenate(chunks), -1, 1) * 32767).astype("<i2")
     with io.BytesIO() as output:
         with wave.open(output, "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(2)
-            wav.setframerate(result.sample_rate)
+            wav.setframerate(sample_rate)
             wav.writeframes(pcm.tobytes())
         return output.getvalue()
 
@@ -722,7 +734,7 @@ async def chat(request: ChatRequest):
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
     if is_play_music_request(request.message):
-        answer = "Wonderful. Let's play some music."
+        answer = random.choice(PLAY_MODE_PROMPTS)
         logger.info("[turn %s] entering play mode", request.turn_id)
         record_interaction("user", request.message)
 

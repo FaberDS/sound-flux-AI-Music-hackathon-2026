@@ -334,19 +334,19 @@ class InterfaceTests(unittest.TestCase):
 
         response = self.client.post(
             f"/api/compositions/{identifier}/effects",
-            json={"at": 0.5, "effect": "drum", "intensity": 1, "pitch": "low"},
+            json={"at": 0.5, "effect": "drum", "intensity": 1, "volume": 0.5, "pitch": "low"},
         )
 
         self.assertEqual(response.status_code, 200, response.text)
         first = response.json()["effects"][0]
-        self.assertEqual({key: first[key] for key in ("at", "effect", "intensity", "pitch")}, {
-            "at": 0.5, "effect": "drum", "intensity": 1.0, "pitch": "low",
+        self.assertEqual({key: first[key] for key in ("at", "effect", "intensity", "volume", "pitch")}, {
+            "at": 0.5, "effect": "drum", "intensity": 1.0, "volume": 0.5, "pitch": "low",
         })
         mixed, _ = sf.read(composition_path(identifier))
         self.assertGreater(np.max(np.abs(mixed[4000:7200])), 0.1)
         response = self.client.post(
             f"/api/compositions/{identifier}/effects",
-            json={"at": 1.9, "effect": "guitar", "intensity": 0.4, "pitch": "high"},
+            json={"at": 1.9, "effect": "guitar", "intensity": 0.4, "volume": 0.75, "pitch": "high"},
         )
         effects = response.json()["effects"]
         self.assertEqual([effect["effect"] for effect in effects], ["drum", "guitar"])
@@ -364,10 +364,27 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(
                 f"/api/compositions/{identifier}/effects",
-                json={"at": 2, "effect": "drum", "intensity": 1, "pitch": "low"},
+                json={"at": 2, "effect": "drum", "intensity": 1, "volume": 1, "pitch": "low"},
             ).status_code,
             400,
         )
+
+    def test_compositions_can_be_deleted_individually_or_all_at_once(self):
+        from app import COMPOSITIONS, base_composition_path, composition_path, effects_path
+        COMPOSITIONS.mkdir()
+        identifiers = ["20260913T123456123456Z-42", "20260913T123457123456Z-43"]
+        for identifier in identifiers:
+            sf.write(composition_path(identifier), np.zeros((80, 2)), 8000, subtype="PCM_16")
+            os.link(composition_path(identifier), base_composition_path(identifier))
+            effects_path(identifier).write_text("[]")
+
+        self.assertEqual(self.client.delete(f"/api/compositions/{identifiers[0]}").status_code, 204)
+        self.assertFalse(composition_path(identifiers[0]).exists())
+        self.assertFalse(base_composition_path(identifiers[0]).exists())
+        self.assertFalse(effects_path(identifiers[0]).exists())
+        self.assertEqual(self.client.delete(f"/api/compositions/{identifiers[0]}").status_code, 404)
+        self.assertEqual(self.client.delete("/api/compositions").status_code, 204)
+        self.assertEqual(self.client.get("/api/compositions").json(), [])
 
     @patch("app.compose", side_effect=RuntimeError("Model setup is incomplete. Run prepare.py"))
     def test_generation_error_reaches_user(self, generate):
