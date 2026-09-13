@@ -472,7 +472,7 @@
     padding: 10px;
   }
   .session-active.focus-mode > .companion-content {
-    align-content: center;
+    align-content: safe center;
     grid-template-columns: minmax(0, min(94vw, 1200px));
     gap: 24px;
     padding: 24px 3vw 140px;
@@ -482,7 +482,7 @@
     width: min(94vw, 1200px);
   }
   .session-active.focus-mode > .companion-content > .amazing-grace-art img {
-    width: min(100%, 1100px);
+    width: min(100%, 1000px);
     height: auto;
     max-height: 68dvh;
   }
