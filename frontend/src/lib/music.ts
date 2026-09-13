@@ -185,6 +185,7 @@ export class MusicRoom {
   private capturedCompositionId: string | null = null
   private epoch = 0
   private volume = 0.45
+  private volumeScale = 1
   private musicVolume = 1
   private effectsVolume = 1
   private autoReplay = true
@@ -215,10 +216,22 @@ export class MusicRoom {
     this.volume = value
     if (this.context && this.gain)
       this.gain.gain.setTargetAtTime(
-        value * 0.45,
+        value * 0.45 * this.volumeScale,
         this.context.currentTime,
         0.05,
       )
+  }
+
+  fadeVolume(scale: number, seconds: number) {
+    this.volumeScale = scale
+    if (!this.context || !this.gain) return
+    const now = this.context.currentTime
+    this.gain.gain.cancelScheduledValues(now)
+    this.gain.gain.setValueAtTime(this.gain.gain.value, now)
+    this.gain.gain.linearRampToValueAtTime(
+      this.volume * 0.45 * scale,
+      now + seconds,
+    )
   }
 
   setMusicVolume(value: number) {
@@ -729,6 +742,11 @@ export class MusicRoom {
       }
     })
     this.voices.clear()
+    this.volumeScale = 1
+    if (this.context && this.gain) {
+      this.gain.gain.cancelScheduledValues(this.context.currentTime)
+      this.gain.gain.value = this.volume * 0.45
+    }
   }
 
   dispose() {

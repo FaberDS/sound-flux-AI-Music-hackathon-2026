@@ -1,14 +1,16 @@
 const OPEN_MOUTH = 0.35
 const CLOSED_MOUTH = 0.2
-const HEAD_TURN = 0.05
 const HEAD_NOD = 0.08
+const HAND_RAISED = 0.05
+const HAND_RELEASED = 0.02
+const MIN_VISIBILITY = 0.5
 
 export interface HeadPose {
   nod: number
-  turn: number
 }
 
-export type HeadControl = 'previous' | 'next' | 'softer' | 'louder'
+export type HeadControl = 'softer' | 'louder'
+export type HandControl = 'previous' | 'next'
 
 export function mouthBeat(jawOpen: number, isOpen: boolean) {
   if (!isOpen && jawOpen >= OPEN_MOUTH) return { isOpen: true, beat: true }
@@ -31,7 +33,6 @@ export function poseFromLandmarks(
   const noseY = nose.y - (leftEye.y + rightEye.y) / 2
   return {
     nod: (-noseX * dy + noseY * dx) / eyeDistance ** 2,
-    turn: (noseX * dx + noseY * dy) / eyeDistance ** 2,
   }
 }
 
@@ -41,28 +42,48 @@ export function headControl(
   active: HeadControl | null,
 ) {
   const nod = pose.nod - baseline.nod
-  const turn = pose.turn - baseline.turn
-  const amount = active === 'previous' || active === 'next' ? turn : nod
-  const threshold = active === 'previous' || active === 'next'
-    ? HEAD_TURN
-    : HEAD_NOD
-  const control: HeadControl | null = turn < -HEAD_TURN
-    ? 'previous'
-    : turn > HEAD_TURN
-      ? 'next'
-      : nod > HEAD_NOD
-        ? 'softer'
-        : nod < -HEAD_NOD
-          ? 'louder'
-          : null
+  const control: HeadControl | null = nod > HEAD_NOD
+    ? 'softer'
+    : nod < -HEAD_NOD
+      ? 'louder'
+      : null
   if (active)
     return {
       control: control && control !== active ? control : null,
       active: control && control !== active
         ? control
-        : Math.abs(amount) < threshold * 0.7
+        : Math.abs(nod) < HEAD_NOD * 0.7
           ? null
           : active,
     }
+  return { control, active: control }
+}
+
+export function handControl(
+  points: readonly { y: number; visibility?: number }[],
+  active: HandControl | null,
+) {
+  const leftShoulder = points[11]
+  const rightShoulder = points[12]
+  const leftWrist = points[15]
+  const rightWrist = points[16]
+  if (
+    !leftShoulder || !rightShoulder || !leftWrist || !rightWrist ||
+    [leftShoulder, rightShoulder, leftWrist, rightWrist]
+      .some(({ visibility = 1 }) => visibility < MIN_VISIBILITY)
+  ) return { control: null, active }
+
+  const left = leftShoulder.y - leftWrist.y
+  const right = rightShoulder.y - rightWrist.y
+  if (active && (active === 'previous' ? left : right) > HAND_RELEASED)
+    return { control: null, active }
+
+  const leftRaised = left > HAND_RAISED
+  const rightRaised = right > HAND_RAISED
+  const control: HandControl | null = leftRaised === rightRaised
+    ? null
+    : leftRaised
+      ? 'previous'
+      : 'next'
   return { control, active: control }
 }

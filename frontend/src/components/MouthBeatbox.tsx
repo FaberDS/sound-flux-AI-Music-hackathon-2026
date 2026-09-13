@@ -1,11 +1,13 @@
-import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
+import { FaceLandmarker, FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { Check, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { EffectPitch, Instrument } from '../lib/music'
 import {
   headControl,
+  handControl,
   mouthBeat,
   poseFromLandmarks,
+  type HandControl,
   type HeadControl,
   type HeadPose,
 } from './mouth-beatbox'
@@ -45,16 +47,19 @@ export function MouthBeatbox({
     const camera = videoElement
     let cancelled = false
     let stream: MediaStream | null = null
-    let tracker: FaceLandmarker | null = null
+    let faceTracker: FaceLandmarker | null = null
+    let poseTracker: PoseLandmarker | null = null
     let frame = 0
     let lastVideoTime = -1
+    let lastPoseAt = 0
     let mouthOpen = false
     let baseline: HeadPose | null = null
     let baselineFrames = 0
     let smoothedPose: HeadPose | null = null
-    let activeControl: HeadControl | null = null
+    let activeHeadControl: HeadControl | null = null
+    let activeHandControl: HandControl | null = null
 
-    const applyHeadControl = (control: HeadControl) => {
+    const applyControl = (control: HeadControl | HandControl) => {
       if (control === 'previous' || control === 'next') {
         const current = effects.findIndex(({ id }) => id === settings.current.effect)
         const direction = control === 'previous' ? -1 : 1
@@ -87,7 +92,7 @@ export function MouthBeatbox({
 
         const base = import.meta.env.BASE_URL
         const vision = await FilesetResolver.forVisionTasks(`${base}mediapipe`)
-        tracker = await FaceLandmarker.createFromOptions(vision, {
+        faceTracker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `${base}face_landmarker.task`,
             delegate: 'GPU',
@@ -96,26 +101,37 @@ export function MouthBeatbox({
           numFaces: 1,
           outputFaceBlendshapes: true,
         })
+        poseTracker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: `${base}pose_landmarker_lite.task`,
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1,
+        })
         if (cancelled) {
-          tracker.close()
+          faceTracker?.close()
+          poseTracker?.close()
+          faceTracker = null
+          poseTracker = null
           return
         }
-        setStatus('Face the camera for hands-free controls')
+        setStatus('Keep your face, shoulders, and hands in view')
 
         const track = () => {
-          if (cancelled || !tracker) return
+          if (cancelled || !faceTracker || !poseTracker) return
           if (
             camera.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
             camera.currentTime !== lastVideoTime
           ) {
             lastVideoTime = camera.currentTime
-            const result = tracker.detectForVideo(camera, performance.now())
+            const now = performance.now()
+            const result = faceTracker.detectForVideo(camera, now)
             const pose = poseFromLandmarks(result.faceLandmarks[0] ?? [])
             if (pose) {
               smoothedPose = smoothedPose
                 ? {
                     nod: smoothedPose.nod * 0.75 + pose.nod * 0.25,
-                    turn: smoothedPose.turn * 0.75 + pose.turn * 0.25,
                   }
                 : pose
               if (baselineFrames < 15) {
@@ -123,16 +139,23 @@ export function MouthBeatbox({
                 baseline = baseline
                   ? {
                       nod: baseline.nod + (smoothedPose.nod - baseline.nod) / baselineFrames,
-                      turn: baseline.turn + (smoothedPose.turn - baseline.turn) / baselineFrames,
                     }
                   : smoothedPose
                 if (baselineFrames === 15)
-                  setStatus('Turn left or right for instruments; nod forward or up for intensity')
+                  setStatus('Raise left hand for previous instrument or right for next; nod for intensity')
               } else if (baseline) {
-                const movement = headControl(smoothedPose, baseline, activeControl)
-                activeControl = movement.active
-                if (movement.control) applyHeadControl(movement.control)
+                const movement = headControl(smoothedPose, baseline, activeHeadControl)
+                activeHeadControl = movement.active
+                if (movement.control) applyControl(movement.control)
               }
+            }
+            // ponytail: 10 Hz is enough for hand lifts; use a worker if tracking janks.
+            if (now - lastPoseAt >= 100) {
+              lastPoseAt = now
+              const landmarks = poseTracker.detectForVideo(camera, now).landmarks[0] ?? []
+              const movement = handControl(landmarks, activeHandControl)
+              activeHandControl = movement.active
+              if (movement.control) applyControl(movement.control)
             }
             const blendshape = result.faceBlendshapes[0]?.categories.find(
                 ({ categoryName }) => categoryName === 'jawOpen',
@@ -157,13 +180,16 @@ export function MouthBeatbox({
         }
         track()
       } catch (error) {
-        tracker?.close()
+        faceTracker?.close()
+        poseTracker?.close()
+        faceTracker = null
+        poseTracker = null
         stream?.getTracks().forEach((track) => track.stop())
         if (!cancelled) {
           setStatus(
             error instanceof DOMException && error.name === 'NotAllowedError'
               ? 'Camera permission was blocked'
-              : 'Face tracking is unavailable',
+              : 'Camera tracking is unavailable',
           )
         }
       }
@@ -173,7 +199,10 @@ export function MouthBeatbox({
     return () => {
       cancelled = true
       cancelAnimationFrame(frame)
-      tracker?.close()
+      faceTracker?.close()
+      poseTracker?.close()
+      faceTracker = null
+      poseTracker = null
       stream?.getTracks().forEach((track) => track.stop())
       camera.srcObject = null
     }
@@ -202,6 +231,7 @@ export function MouthBeatbox({
             <EffectIcon size={48} strokeWidth={1.6} aria-hidden="true" />
           </span>
           <strong>{selectedEffect.name}</strong>
+          <small>Lift left for previous · right for next</small>
         </div>
       )}
       <div className="mouth-camera-row">

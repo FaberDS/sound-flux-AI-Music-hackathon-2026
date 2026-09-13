@@ -1646,6 +1646,12 @@
     background: #30251e75;
     backdrop-filter: blur(5px);
   }
+  .room-dialog[role='alertdialog'] {
+    animation: completion-prompt-in 900ms ease-out both;
+  }
+  .room-dialog[role='alertdialog']::backdrop {
+    animation: completion-backdrop-in 900ms ease-out both;
+  }
   .journey-dialog {
     width: 100%;
     max-width: none;
@@ -2037,6 +2043,14 @@
   to {
     opacity: 1;
   }
+}
+
+@keyframes completion-prompt-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); }
+}
+
+@keyframes completion-backdrop-in {
+  from { opacity: 0; }
 }
 
 @keyframes camera-action-feedback {

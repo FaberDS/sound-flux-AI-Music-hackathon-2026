@@ -115,6 +115,7 @@ const amazingGraceImages = [
 ]
 const layerVolumeKey = 'sound-flux-layer-volumes'
 const completionPromptDelay = 15_000
+const completionPromptLeadIn = 2_000
 
 function savedLayerVolumes() {
   try {
@@ -537,6 +538,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
   useEffect(() => {
     if (!playing || !compositionMode || completionPromptOpen) return
     let active = true
+    const duckTimer = setTimeout(
+      () => music.fadeVolume(0.55, completionPromptLeadIn / 1_000),
+      completionPromptDelay - completionPromptLeadIn,
+    )
     const timer = setTimeout(() => {
       void music.pause().catch(() => music.stop()).then(() => {
         if (!active) return
@@ -546,6 +551,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }, completionPromptDelay)
     return () => {
       active = false
+      clearTimeout(duckTimer)
       clearTimeout(timer)
     }
   }, [completionPromptOpen, compositionMode, music, playing])
@@ -798,6 +804,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     setCompletionPromptOpen(false)
     try {
       setPlaying(await music.resume())
+      music.fadeVolume(1, 1.2)
     } catch {
       music.stop()
       setMusicError('The sound could not continue. Please play it again.')

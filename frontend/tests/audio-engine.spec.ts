@@ -141,6 +141,9 @@ test('controls and refreshes audio layers independently', async ({ page }) => {
             get value() { return audio.gains[index] },
             set value(value: number) { audio.gains[index] = value },
             setTargetAtTime(value: number) { audio.gains[index] = value },
+            cancelScheduledValues() {},
+            setValueAtTime(value: number) { audio.gains[index] = value },
+            linearRampToValueAtTime(value: number) { audio.gains[index] = value },
           },
           connect() {},
         }
@@ -184,6 +187,7 @@ test('controls and refreshes audio layers independently', async ({ page }) => {
     await room.refreshCompositionEffects('/song.wav')
     room.setMusicVolume(0.35)
     room.setEffectsVolume(0.65)
+    room.fadeVolume(0.55, 2)
     room.setAutoReplay(false)
     audio.sources[0].onended?.()
     return {
@@ -196,7 +200,7 @@ test('controls and refreshes audio layers independently', async ({ page }) => {
 
   expect(starts).toEqual({
     starts: [0, 1.25],
-    gains: [0.45 * 0.45, 0.35, 0.65],
+    gains: [0.45 * 0.45 * 0.55, 0.35, 0.65],
     loops: [false, false],
     ended: 1,
   })
