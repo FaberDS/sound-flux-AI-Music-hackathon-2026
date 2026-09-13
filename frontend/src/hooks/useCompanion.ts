@@ -27,6 +27,8 @@ export function useCompanion(
   onTurnFinished: () => void,
   onboarding: ProfileState['onboarding'],
   name: string,
+  onMusicPromptFinished?: () => void,
+  onMusicModeStarted?: () => void,
 ) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [transcript, setTranscript] = useState('')
@@ -38,6 +40,7 @@ export function useCompanion(
   const [continuous, setContinuous] = useState(false)
   const [playMode, setPlayMode] = useState(false)
   const continuousRef = useRef(false)
+  const playModeRef = useRef(false)
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const active = useRef<Turn | null>(null)
   const pendingInterrupts = useRef(new Set<Promise<void>>())
@@ -52,7 +55,7 @@ export function useCompanion(
   const audioUrl = useRef<string | null>(null)
   const playbackGeneration = useRef(0)
   const pendingOnboardingKey = useRef<string | null>(null)
-  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished, onboarding, name })
+  const settings = useRef({ readAloud, volume, savedHistory, onTurnFinished, onboarding, name, onMusicPromptFinished, onMusicModeStarted })
 
   const clearCapture = useCallback((closeSocket = true) => {
     if (timer.current) clearInterval(timer.current)
@@ -102,6 +105,7 @@ export function useCompanion(
   const stop = useCallback(() => {
     continuousRef.current = false
     setContinuous(false)
+    playModeRef.current = false
     setPlayMode(false)
     const interrupted = cancel()
     setPhase('idle')
@@ -118,9 +122,9 @@ export function useCompanion(
   )
 
   useEffect(() => {
-    settings.current = { readAloud, volume, savedHistory, onTurnFinished, onboarding, name }
+    settings.current = { readAloud, volume, savedHistory, onTurnFinished, onboarding, name, onMusicPromptFinished, onMusicModeStarted }
     if (player.current) player.current.volume = volume
-  }, [readAloud, volume, savedHistory, onTurnFinished, onboarding, name])
+  }, [readAloud, volume, savedHistory, onTurnFinished, onboarding, name, onMusicPromptFinished, onMusicModeStarted])
   useEffect(() => {
     if (!readAloud) {
       player.current?.pause()
@@ -157,9 +161,13 @@ export function useCompanion(
     )
   }
 
-  function finishResponse(turn: Turn) {
+  function finishResponse(turn: Turn, startMusic = false) {
     if (!isCurrent(turn)) return
     setPhase('idle')
+    if (startMusic) {
+      settings.current.onMusicPromptFinished?.()
+      return
+    }
     if (restartTimer.current) clearTimeout(restartTimer.current)
     if (continuousRef.current) {
       setPhase('permission')
@@ -174,6 +182,7 @@ export function useCompanion(
     setTranscript(text)
     setPhase('thinking')
     const startedAt = performance.now()
+    let startMusic = false
     try {
       const onboardingKey = pendingOnboardingKey.current
       pendingOnboardingKey.current = null
@@ -193,7 +202,10 @@ export function useCompanion(
           if (mode === 'play') {
             continuousRef.current = false
             setContinuous(false)
+            playModeRef.current = true
             setPlayMode(true)
+            startMusic = true
+            settings.current.onMusicModeStarted?.()
           }
         },
         (key) => {
@@ -215,7 +227,7 @@ export function useCompanion(
       setTurns([...turnsRef.current])
       settings.current.onTurnFinished()
       if (!settings.current.readAloud) {
-        finishResponse(turn)
+        finishResponse(turn, startMusic)
         return
       }
       try {
@@ -226,7 +238,7 @@ export function useCompanion(
         )
         if (!isCurrent(turn)) return
         if (!settings.current.readAloud) {
-          finishResponse(turn)
+          finishResponse(turn, startMusic)
           return
         }
         audioUrl.current = URL.createObjectURL(blob)
@@ -235,10 +247,10 @@ export function useCompanion(
         player.current = audio
         setCanReplay(true)
         audio.onended = () => {
-          finishResponse(turn)
+          finishResponse(turn, startMusic)
         }
         audio.onpause = () => {
-          finishResponse(turn)
+          finishResponse(turn, startMusic)
         }
         try {
           await audio.play()
@@ -327,7 +339,7 @@ export function useCompanion(
         }
         if (++audioFrames % 8 === 0 && automatic) {
           const level = Math.sqrt(sum / input.length)
-          if (level >= 0.01) {
+          if (level >= 0.003) {
             heardSpeech = true
             lastSpeechAt = performance.now()
           } else if (heardSpeech && performance.now() - lastSpeechAt >= 1_200) {
@@ -392,6 +404,8 @@ export function useCompanion(
   }
 
   async function startConversation() {
+    playModeRef.current = false
+    setPlayMode(false)
     continuousRef.current = true
     setContinuous(true)
     const turn = beginTurn()
@@ -444,13 +458,16 @@ export function useCompanion(
     const name = settings.current.name ? `, ${settings.current.name}` : ''
     continuousRef.current = false
     setContinuous(false)
+    playModeRef.current = true
     setPlayMode(true)
+    settings.current.onMusicModeStarted?.()
     return speakBeforeListening(
       `Let's do some music${name}. I am glad you are here. Hum a melody for me.`,
       null,
       turn,
       () => {
         setPhase('idle')
+        settings.current.onMusicPromptFinished?.()
       },
     )
   }

@@ -192,10 +192,12 @@
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1fr);
     gap: 64px;
+    min-height: calc(100dvh - 136px);
+    padding-top: 28px;
     align-items: start;
   }
   .hero-copy {
-    padding: 26px 0 0;
+    padding: calc(48px + 8vh) 0 0;
   }
   .hero-copy h1 {
     color: var(--color-brown);
@@ -281,6 +283,12 @@
   .companion-card > .voice-controls {
     order: 3;
   }
+  .companion-card > .composition-controls {
+    order: 3;
+  }
+  .companion-card > .mouth-beatbox {
+    order: 4;
+  }
   .companion-card > .replay-button {
     order: 4;
   }
@@ -321,11 +329,18 @@
   .session-active > .voice-controls {
     order: 4;
   }
+  .session-active > .composition-controls {
+    order: 4;
+  }
+  .session-active > .mouth-beatbox {
+    order: 5;
+  }
   .session-active > :first-child,
   .session-active .record-art,
   .session-active .amazing-grace-art,
   .session-active .companion-message,
   .session-active .voice-controls,
+  .session-active .composition-controls,
   .session-active .replay-button,
   .session-active .companion-footnote,
   .session-active > .error-message {
@@ -366,6 +381,16 @@
     height: 210px;
     margin: 4px -28px 8px;
     overflow: hidden;
+  }
+  .music-preparation {
+    align-content: center;
+    gap: 14px;
+  }
+  .music-preparation > p {
+    margin: 0;
+    color: var(--color-brown);
+    font-size: 20px;
+    font-weight: 700;
   }
   .amazing-grace-art {
     position: relative;
@@ -530,6 +555,67 @@
     gap: 8px;
     margin-top: 20px;
   }
+  .composition-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .composition-controls > button:not(.music-button) {
+    min-height: 56px;
+    padding: 12px 20px;
+    border: 2px solid var(--color-line);
+    border-radius: 8px;
+    color: var(--color-brown);
+    font-weight: 700;
+  }
+  .mouth-beatbox {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 16px;
+    padding: 12px;
+    border: 2px solid var(--color-line);
+    border-radius: 8px;
+    background: #fffefa;
+  }
+  .mouth-camera {
+    width: 100px;
+    height: 76px;
+    flex: 0 0 auto;
+    border-radius: 5px;
+    background: var(--color-ink);
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+  .mouth-beatbox > div {
+    min-width: 0;
+  }
+  .mouth-beatbox strong {
+    display: block;
+    color: var(--color-brown);
+  }
+  .mouth-beatbox p {
+    margin: 2px 0 8px;
+    color: var(--color-muted);
+    font-size: 15px;
+  }
+  .mouth-beatbox-toggle {
+    min-height: 36px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-brown);
+    border-radius: 5px;
+    color: var(--color-brown);
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .composition-mode .voice-controls,
+  .composition-mode .replay-button,
+  .composition-mode .companion-footnote {
+    display: none;
+  }
   .microphone-button {
     display: flex;
     gap: 10px;
@@ -579,8 +665,70 @@
     padding: 10px 12px;
   }
   .instruments-section {
-    margin-top: 60px;
-    scroll-margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 100dvh;
+    margin-top: 0;
+    padding: 64px 0;
+    scroll-margin-top: 0;
+  }
+  .instruments-section .section-heading,
+  .instruments-section .instrument-grid {
+    width: min(1050px, 100%);
+    margin-inline: auto;
+  }
+  .instruments-section .section-heading {
+    justify-content: center;
+    margin-bottom: 26px;
+    text-align: center;
+  }
+  .compositions-section {
+    margin-top: 48px;
+  }
+  .section-heading > p {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 17px;
+  }
+  .composition-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+  }
+  .composition-card {
+    display: grid;
+    grid-template-columns: 88px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    min-height: 108px;
+    padding: 10px;
+    border: 2px solid var(--color-line);
+    border-radius: 8px;
+    background: #fffefa;
+    color: var(--color-brown);
+    text-align: left;
+  }
+  .composition-card:hover {
+    background: #f9f1e2;
+    transform: translateY(-2px);
+  }
+  .composition-card img {
+    width: 88px;
+    height: 88px;
+    object-fit: cover;
+    border-radius: 5px;
+  }
+  .composition-card > span {
+    display: grid;
+    gap: 4px;
+  }
+  .composition-card strong {
+    font-size: 20px;
+  }
+  .composition-card time {
+    color: var(--color-muted);
+    font-size: 15px;
   }
   .section-heading {
     display: flex;
@@ -600,22 +748,22 @@
   }
   .instrument-card {
     position: relative;
-    min-height: 132px;
+    min-height: 184px;
     border: 2px solid var(--color-line);
     background: #fffefa;
     border-radius: 8px;
     display: flex;
     align-items: center;
     text-align: left;
-    gap: 20px;
-    padding: 24px;
+    gap: 24px;
+    padding: 30px 34px;
     color: var(--color-brown);
   }
   .instrument-icon {
     display: grid;
     place-items: center;
-    width: 64px;
-    height: 64px;
+    width: 78px;
+    height: 78px;
     border-radius: 8px;
     flex-shrink: 0;
   }
@@ -637,7 +785,7 @@
     gap: 5px;
   }
   .instrument-description strong {
-    font-size: 22px;
+    font-size: 26px;
     font-weight: 600;
   }
   .instrument-arrow {
@@ -783,6 +931,242 @@
     background: #30251e75;
     backdrop-filter: blur(5px);
   }
+  .journey-dialog {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 28px max(5.4%, 28px) 36px;
+    border: 0;
+    border-radius: 0;
+    overflow-y: auto;
+  }
+  .journey-dialog::backdrop {
+    background: var(--color-paper);
+    backdrop-filter: none;
+  }
+  .journey-dialog .dialog-header,
+  .journey-dialog > :not(.dialog-header) {
+    width: min(1180px, 100%);
+    margin-inline: auto;
+  }
+  .journey-dialog .dialog-header {
+    align-items: center;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .journey-dialog .dialog-header h2 {
+    font-size: 30px;
+    letter-spacing: -0.4px;
+  }
+  .journey-intro {
+    padding: 42px 0 30px;
+    text-align: center;
+  }
+  .journey-intro > p,
+  .journey-copy > span {
+    color: var(--color-orange);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+  }
+  .journey-intro h3 {
+    margin: 8px auto 12px;
+    color: var(--color-brown);
+    font: 700 clamp(44px, 5vw, 66px)/0.95 var(--font-display);
+    letter-spacing: -1px;
+    text-transform: uppercase;
+  }
+  .journey-intro > span {
+    display: block;
+    max-width: 670px;
+    margin: auto;
+    color: var(--color-muted);
+    font-size: 18px;
+    line-height: 1.65;
+  }
+  .journey-steps {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .journey-steps::before {
+    position: absolute;
+    content: '';
+    top: 96px;
+    left: 16%;
+    right: 16%;
+    border-top: 2px dashed #d8c9b5;
+  }
+  .journey-steps > li {
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    border: 1px solid var(--color-line);
+    border-radius: 16px;
+    background: #fffefa;
+    box-shadow: 0 12px 32px #70432f0b;
+  }
+  .journey-art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 190px;
+    overflow: hidden;
+    background: #f8efd8;
+  }
+  .journey-art::before {
+    position: absolute;
+    content: '';
+    width: 220px;
+    height: 220px;
+    border: 1px solid #e5cda7;
+    border-radius: 50%;
+  }
+  .journey-profile {
+    background: #f7eedc;
+  }
+  .profile-person {
+    display: grid;
+    place-items: center;
+    width: 92px;
+    height: 92px;
+    border-radius: 50%;
+    background: var(--color-yellow);
+    color: var(--color-brown);
+  }
+  .preference {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 7px 12px;
+    border: 1px solid #e3d6c3;
+    border-radius: 20px;
+    background: #fffefa;
+    color: var(--color-brown);
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 7px 18px #70432f14;
+  }
+  .preference-one {
+    top: 25px;
+    right: 22px;
+  }
+  .preference-two {
+    bottom: 24px;
+    left: 20px;
+  }
+  .journey-memories {
+    grid-template-columns: 1fr auto 1fr;
+    padding: 34px;
+    background: #fff0e7;
+  }
+  .memory-card {
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 76px;
+    height: 94px;
+    border: 7px solid #fffefa;
+    border-bottom-width: 19px;
+    border-radius: 4px;
+    color: var(--color-brown);
+    box-shadow: 0 8px 20px #70432f1a;
+  }
+  .memory-one {
+    justify-self: end;
+    background: var(--color-yellow);
+    transform: rotate(-8deg);
+  }
+  .memory-two {
+    justify-self: start;
+    background: #dfe4d3;
+    transform: rotate(7deg);
+  }
+  .memory-wave {
+    z-index: 2;
+    color: var(--color-orange);
+  }
+  .journey-create {
+    background: #eee8dd;
+  }
+  .journey-record {
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 116px;
+    height: 116px;
+    border: 9px solid #302923;
+    border-radius: 50%;
+    background: repeating-radial-gradient(circle, #3c352e 0 2px, #302a25 3px 7px);
+    color: var(--color-brown);
+  }
+  .journey-record::before {
+    position: absolute;
+    content: '';
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--color-orange);
+  }
+  .journey-record svg {
+    z-index: 1;
+  }
+  .sound-chip {
+    position: absolute;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 2px solid #fffefa;
+    border-radius: 50%;
+    background: var(--color-yellow);
+    color: var(--color-brown);
+    box-shadow: 0 5px 14px #70432f1f;
+  }
+  .sound-piano { top: 26px; right: 50px; }
+  .sound-guitar { bottom: 24px; right: 42px; background: #ffd5bc; }
+  .sound-drum { bottom: 32px; left: 48px; background: #dfe4d3; }
+  .journey-copy {
+    min-height: 205px;
+    padding: 25px 26px 28px;
+  }
+  .journey-copy h4 {
+    margin: 9px 0 10px;
+    color: var(--color-brown);
+    font: 400 27px/1.2 var(--font-serif);
+  }
+  .journey-copy p {
+    color: var(--color-muted);
+    font-size: 16px;
+    line-height: 1.65;
+  }
+  .journey-finish {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding-top: 26px;
+  }
+  .journey-finish p {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-muted);
+    font-size: 15px;
+  }
+  .journey-finish .dialog-primary {
+    width: auto;
+    min-width: 310px;
+    margin-top: 0;
+    padding-inline: 26px;
+  }
   .icon-button {
     display: grid;
     place-items: center;
@@ -790,55 +1174,6 @@
     height: 48px;
     background: #f0ece3;
     border-radius: 50%;
-  }
-  .dialog-intro {
-    color: var(--color-muted);
-    font-size: 18px;
-    line-height: 1.6;
-    margin: 18px 0 25px;
-  }
-  .help-steps {
-    display: grid;
-    gap: 22px;
-    margin-bottom: 25px;
-  }
-  .help-steps li {
-    gap: 18px;
-  }
-  .help-steps li > span {
-    display: grid;
-    place-items: center;
-    flex-shrink: 0;
-    background: var(--color-yellow);
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .help-steps h3 {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-  .help-steps p {
-    font-size: 18px;
-    line-height: 1.7;
-    color: var(--color-muted);
-  }
-  .dialog-note {
-    background: #f2eee4;
-    border-radius: 8px;
-    padding: 15px;
-    font-size: 18px;
-    line-height: 1.6;
-    color: var(--color-muted);
-    display: flex;
-    gap: 10px;
-  }
-  .dialog-note svg {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
   .dialog-primary {
     display: flex;
@@ -932,6 +1267,9 @@
   .main-content {
     padding-top: 65px;
   }
+  .hero-grid {
+    min-height: calc(100dvh - 157px);
+  }
   .hero-copy h1 {
     font-size: 76px;
   }
@@ -950,7 +1288,7 @@
     height: 216px;
   }
   .instruments-section {
-    margin-top: 64px;
+    margin-top: 0;
   }
 }
 @media (max-width: 1100px) {
@@ -960,6 +1298,9 @@
   }
   .main-content {
     padding: 38px 4% 0;
+  }
+  .hero-grid {
+    min-height: calc(100dvh - 130px);
   }
   .hero-grid {
     gap: 36px;
@@ -989,11 +1330,14 @@
     font-size: 24px;
   }
   .desktop-nav {
-    display: none;
+    margin-left: auto;
   }
   .hero-grid {
     gap: 25px;
     grid-template-columns: 1fr;
+    min-height: 0;
+    padding-top: 0;
+    align-items: start;
   }
   .hero-copy {
     padding: 0;
@@ -1042,11 +1386,48 @@
   }
   .instrument-card {
     min-height: 124px;
+    padding: 24px;
+  }
+  .instrument-icon {
+    width: 64px;
+    height: 64px;
+  }
+  .instrument-description strong {
+    font-size: 22px;
+  }
+  .instruments-section {
+    display: block;
+    min-height: 0;
+    padding: 48px 0;
   }
   .session-toolbar {
     flex-wrap: wrap;
     gap: 8px;
     padding: 24px 0 15px;
+  }
+  .journey-dialog {
+    padding-inline: 24px;
+  }
+  .journey-steps {
+    grid-template-columns: 1fr;
+  }
+  .journey-steps::before {
+    display: none;
+  }
+  .journey-steps > li {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.8fr) 1fr;
+  }
+  .journey-art {
+    height: 100%;
+    min-height: 220px;
+  }
+  .journey-finish {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .journey-finish .dialog-primary {
+    width: 100%;
   }
 }
 @media (max-width: 520px) {
@@ -1068,6 +1449,11 @@
   .brand-icon {
     width: 36px;
     height: 36px;
+  }
+  .nav-link {
+    min-height: 48px;
+    padding-inline: 8px;
+    font-size: 16px;
   }
   .companion-link {
     width: 56px;
@@ -1193,6 +1579,41 @@
   }
   .room-dialog {
     padding: 23px;
+  }
+  .journey-dialog {
+    padding: 20px 18px 28px;
+  }
+  .journey-dialog .dialog-header {
+    padding-bottom: 16px;
+  }
+  .journey-intro {
+    padding: 34px 0 26px;
+    text-align: left;
+  }
+  .journey-intro h3 {
+    margin-inline: 0;
+    font-size: 46px;
+  }
+  .journey-intro > span {
+    font-size: 17px;
+  }
+  .journey-steps > li {
+    display: block;
+  }
+  .journey-art {
+    height: 190px;
+    min-height: 0;
+  }
+  .journey-copy {
+    min-height: 0;
+  }
+  .journey-finish .dialog-primary {
+    min-width: 0;
+  }
+}
+@media (max-width: 360px) {
+  .brand > span:last-child {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

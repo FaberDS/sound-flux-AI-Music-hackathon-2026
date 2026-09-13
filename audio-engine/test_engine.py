@@ -214,6 +214,9 @@ class InterfaceTests(unittest.TestCase):
         settings_patch = patch("app.SETTINGS", Path(folder.name) / "settings.json")
         settings_patch.start()
         self.addCleanup(settings_patch.stop)
+        compositions_patch = patch("app.COMPOSITIONS", Path(folder.name) / "compositions")
+        compositions_patch.start()
+        self.addCleanup(compositions_patch.stop)
         self.client = TestClient(app, base_url="http://127.0.0.1")
         buffer = io.BytesIO()
         rate, samples = hum()
@@ -280,12 +283,16 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text[:200])
         self.assertEqual(response.headers["content-type"], "audio/wav")
         self.assertEqual(response.headers["x-generation-seed"], "42")
+        identifier = response.headers["x-composition-id"]
         self.assertEqual(response.headers["cache-control"], "no-store")
         result, rate = sf.read(io.BytesIO(response.content))
         self.assertEqual((rate, result.shape), (44100, (220500, 2)))
         audio, options = generate.call_args.args
         self.assertEqual(audio[0], 48000)
         self.assertEqual(options.seed, 42)
+        library = self.client.get("/api/compositions").json()
+        self.assertEqual([item["id"] for item in library], [identifier])
+        self.assertEqual(self.client.get(library[0]["url"]).content, response.content)
 
     @patch("app.compose")
     def test_invalid_settings_and_audio_never_reach_model(self, generate):

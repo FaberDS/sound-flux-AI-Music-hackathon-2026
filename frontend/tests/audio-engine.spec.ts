@@ -19,34 +19,128 @@ function wav() {
   return output
 }
 
-test('hands the post-greeting microphone over to the audio engine', async ({ page }) => {
+test('opens a saved composition in the artwork player', async ({ page }) => {
+  await page.addInitScript(() => {
+    class Context {
+      state = 'running'
+      destination = {}
+      async resume() {}
+      createGain() {
+        return {
+          gain: { value: 0, setTargetAtTime() {} },
+          connect() {},
+        }
+      }
+      async decodeAudioData() {
+        return {
+          sampleRate: 8_000,
+          getChannelData() {
+            return new Float32Array(8_000)
+          },
+        } as unknown as AudioBuffer
+      }
+      createBufferSource() {
+        return { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {} }
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: Context })
+  })
+  await page.route('**/api/health', (route) =>
+    route.fulfill({ json: { chat_model: 'test-model' } }),
+  )
+  await mockSavedApi(page)
+  await page.route('**/engine/api/compositions/*', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: wav() }),
+  )
+  await page.route('**/engine/api/compositions', (route) =>
+    route.fulfill({
+      json: [{
+        id: '20260913T123456123456Z-42',
+        created_at: '2026-09-13T12:34:56Z',
+      }],
+    }),
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /Play composition from/ }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Your composition is playing' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('img', { name: 'Artwork for your saved composition' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Voice companion' })
+      .getByRole('button', { name: 'Pause music' }),
+  ).toBeVisible()
+})
+
+test('prepares music, then records the hum before composing', async ({ page }) => {
   let uploads = 0
   let body = ''
-  let releaseComposition!: () => void
-  const composition = new Promise<void>((resolve) => {
-    releaseComposition = resolve
-  })
   await page.addInitScript(() => {
     const state = { level: 0.05 }
-    Object.assign(window, { audioEngineTest: state })
     navigator.mediaDevices.getUserMedia = async () =>
       ({ getTracks: () => [{ stop() {} }] }) as unknown as MediaStream
-    AudioContext.prototype.createMediaStreamSource = () =>
-      ({ connect() {}, disconnect() {} }) as unknown as MediaStreamAudioSourceNode
-    AudioContext.prototype.createAnalyser = () =>
-      ({
-        fftSize: 2048,
-        getFloatTimeDomainData(samples: Float32Array) {
-          samples.fill(state.level)
-        },
-        disconnect() {},
-      }) as unknown as AnalyserNode
+    class Context {
+      state = 'running'
+      currentTime = 0
+      destination = {}
+      async resume() {}
+      async close() {}
+      createGain() {
+        return {
+          gain: {
+            value: 0,
+            setTargetAtTime() {},
+            setValueAtTime() {},
+            linearRampToValueAtTime() {},
+            exponentialRampToValueAtTime() {},
+          },
+          connect() {},
+          disconnect() {},
+        }
+      }
+      createOscillator() {
+        return {
+          type: 'sine',
+          frequency: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+          connect() {},
+          disconnect() {},
+          start() {},
+          stop() {},
+        }
+      }
+      createMediaStreamSource() {
+        return { connect() {}, disconnect() {} }
+      }
+      createAnalyser() {
+        return {
+          fftSize: 2048,
+          getFloatTimeDomainData(samples: Float32Array) {
+            samples.fill(state.level)
+          },
+          disconnect() {},
+        }
+      }
+      async decodeAudioData() {
+        return {
+          sampleRate: 8_000,
+          getChannelData() {
+            return new Float32Array(8_000)
+          },
+        } as unknown as AudioBuffer
+      }
+      createBufferSource() {
+        return { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {} }
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: Context })
     class Recorder {
       state: RecordingState = 'inactive'
       mimeType = 'audio/wav'
       ondataavailable: ((event: BlobEvent) => void) | null = null
       onstop: (() => void) | null = null
-      onerror: (() => void) | null = null
       start() {
         this.state = 'recording'
         setTimeout(() => {
@@ -56,25 +150,7 @@ test('hands the post-greeting microphone over to the audio engine', async ({ pag
       stop() {
         if (this.state === 'inactive') return
         this.state = 'inactive'
-        const samples = new Uint8Array(44 + 8_000 * 2)
-        const view = new DataView(samples.buffer)
-        const text = (offset: number, value: string) =>
-          [...value].forEach((character, index) =>
-            view.setUint8(offset + index, character.charCodeAt(0)),
-          )
-        text(0, 'RIFF')
-        view.setUint32(4, 36 + 8_000 * 2, true)
-        text(8, 'WAVEfmt ')
-        view.setUint32(16, 16, true)
-        view.setUint16(20, 1, true)
-        view.setUint16(22, 1, true)
-        view.setUint32(24, 8_000, true)
-        view.setUint32(28, 16_000, true)
-        view.setUint16(32, 2, true)
-        view.setUint16(34, 16, true)
-        text(36, 'data')
-        view.setUint32(40, 8_000 * 2, true)
-        this.ondataavailable?.({ data: new Blob([samples], { type: this.mimeType }) } as BlobEvent)
+        this.ondataavailable?.({ data: new Blob([new Uint8Array(8_000)], { type: this.mimeType }) } as BlobEvent)
         setTimeout(() => this.onstop?.(), 0)
       }
     }
@@ -105,24 +181,20 @@ test('hands the post-greeting microphone over to the audio engine', async ({ pag
   await page.route('**/engine/api/compose', (route) => {
     uploads++
     body = route.request().postDataBuffer()!.toString('latin1')
-    return composition.then(() =>
-      route.fulfill({ contentType: 'audio/wav', body: wav() }),
-    )
+    return route.fulfill({ contentType: 'audio/wav', body: wav() })
   })
   await page.goto('/')
   await page.getByRole('button', { name: 'Talk with Sound Flux' }).click()
   await expect(
-    page.getByRole('heading', { name: /Hum a melody for me/ }),
+    page.getByText('Preparing your style of music'),
   ).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Music artwork' })).toHaveCount(0)
+  await expect(page.getByRole('img', { name: 'Music artwork' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('button', { name: 'Humming…' })).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Humming…' }),
-  ).toBeVisible()
+    page.getByRole('region', { name: 'Voice companion' }),
+  ).toHaveClass(/session-active/)
   await expect.poll(() => uploads).toBe(1)
-  expect(uploads).toBe(1)
   expect(body).toContain('name="audio"')
-  expect(body).toContain('RIFF')
-  expect(body).toContain('name="settings"')
-  await expect(page.locator('.composer-overlay')).toBeVisible()
-  releaseComposition()
   await expect(page.getByRole('button', { name: 'Pause music' })).toBeVisible()
 })

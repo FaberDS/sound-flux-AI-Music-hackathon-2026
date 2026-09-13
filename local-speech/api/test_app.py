@@ -40,6 +40,29 @@ class InterruptTest(unittest.TestCase):
                 self.assertEqual(audio.getframerate(), 16_000)
                 self.assertEqual(audio.getnframes(), 160)
 
+    def test_subprocess_does_not_read_from_the_terminal(self):
+        original_spawn = app.asyncio.create_subprocess_exec
+        observed = {}
+
+        class Process:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def fake_spawn(*_command, **options):
+            observed.update(options)
+            return Process()
+
+        app.asyncio.create_subprocess_exec = fake_spawn
+        try:
+            asyncio.run(app.run_process("detached-stdin", "ffmpeg"))
+            self.assertIs(observed["stdin"], asyncio.subprocess.DEVNULL)
+        finally:
+            app.asyncio.create_subprocess_exec = original_spawn
+            app.cancel_events.pop("detached-stdin", None)
+            app.active_processes.pop("detached-stdin", None)
+
     def test_normal_live_stop_leaves_turn_available_for_chat(self):
         turn_id = "normal-live-stop"
         with TestClient(app.app) as client:
@@ -125,6 +148,28 @@ class InterruptTest(unittest.TestCase):
                 self.assertIn('event: mode', body)
                 self.assertIn('"value": "play"', body)
                 self.assertEqual(app.profile_properties(), [])
+            finally:
+                app.DB_PATH = original_path
+
+    def test_agent_play_prompt_enters_play_mode_after_onboarding(self):
+        import tempfile
+        from pathlib import Path
+
+        async def collect_response():
+            response = await app.chat(app.ChatRequest(
+                turn_id="onboarding-play-mode", message="Jazz", onboarding_key="music_preferences",
+            ))
+            return "".join([chunk async for chunk in response.body_iterator])
+
+        original_path = app.DB_PATH
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                app.DB_PATH = Path(directory) / "profile.db"
+                app.initialize_database()
+                body = asyncio.run(collect_response())
+                self.assertIn("Let's play some music.", body)
+                self.assertIn('event: mode', body)
+                self.assertLess(body.index('event: mode'), body.index('event: done'))
             finally:
                 app.DB_PATH = original_path
 

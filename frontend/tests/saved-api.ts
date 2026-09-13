@@ -20,14 +20,19 @@ export async function mockSavedApi(
   }
   const profile = (): ProfileState => ({
     greeting: state.greeting,
-    properties: Object.entries(state.values).map(([key, value]) => ({
-      key: key as ProfileKey,
-      value,
-      label: key,
-      category: 'Personal',
-      is_profile_property: true,
-      updated_at: '2026-09-12 12:00:00',
-    })),
+    properties: Object.entries(state.values)
+      .filter(([key]) => key !== 'music_preferences')
+      .map(([key, value]) => ({
+        key: key as ProfileKey,
+        value,
+        label: key,
+        category: 'Personal',
+        is_profile_property: true,
+        updated_at: '2026-09-12 12:00:00',
+      })),
+    music_preferences: state.values.music_preferences
+      ? [{ value: state.values.music_preferences }]
+      : [],
     onboarding: (() => {
       const key = (
         ['name', 'birth_year', 'mood', 'music_preferences'] as const

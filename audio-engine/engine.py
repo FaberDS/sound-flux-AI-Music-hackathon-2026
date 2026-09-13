@@ -26,7 +26,7 @@ class GenerationError(RuntimeError):
 class Options:
     prompt: str = DEFAULT_PROMPT
     seconds: float = 15
-    strength: float = 0.
+    strength: float = 0.55
     steps: int = 8
     cfg: float = 2.5
     seed: int = -1

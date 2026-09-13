@@ -2,6 +2,33 @@ export type Instrument = 'piano' | 'guitar' | 'bells' | 'drum'
 export type Mood = 'calm' | 'bright'
 export type CapturePhase = 'idle' | 'recording' | 'composing'
 
+export interface SavedComposition {
+  id: string
+  created_at: string
+  url: string
+}
+
+export async function getCompositions(signal: AbortSignal) {
+  const response = await fetch('/engine/api/compositions', { signal })
+  if (!response.ok) throw new Error('The saved compositions could not be loaded.')
+  const data: unknown = await response.json()
+  if (!Array.isArray(data)) throw new Error('The saved compositions could not be read.')
+  return data.reduce<SavedComposition[]>((items, item) => {
+    if (
+      item &&
+      typeof item === 'object' &&
+      typeof item.id === 'string' &&
+      typeof item.created_at === 'string'
+    )
+      items.push({
+        id: item.id,
+        created_at: item.created_at,
+        url: `/engine/api/compositions/${encodeURIComponent(item.id)}`,
+      })
+    return items
+  }, [])
+}
+
 export class MusicRoom {
   private context: AudioContext | null = null
   private gain: GainNode | null = null
@@ -102,6 +129,11 @@ export class MusicRoom {
     )
   }
 
+  beat() {
+    if (!this.context || this.context.state === 'closed' || !this.gain) return
+    this.note(60, 'drum', 0.4, 0.32)
+  }
+
   async start(mood: Mood) {
     this.stop()
     const epoch = this.epoch
@@ -132,6 +164,7 @@ export class MusicRoom {
 
   async captureAndCompose(
     onCapturePhaseChange: (phase: CapturePhase) => void,
+    onComposition?: (identifier: string) => void,
   ) {
     this.stop()
     const epoch = this.epoch
@@ -167,11 +200,9 @@ export class MusicRoom {
         await response.arrayBuffer(),
       )
       if (epoch !== this.epoch) return false
-      this.loop = this.context!.createBufferSource()
-      this.loop.buffer = buffer
-      this.loop.loop = true
-      this.loop.connect(this.gain!)
-      this.loop.start()
+      this.startLoop(buffer)
+      const identifier = response.headers.get('X-Composition-ID')
+      if (identifier) onComposition?.(identifier)
       onCapturePhaseChange('idle')
       return true
     } catch (error) {
@@ -181,6 +212,26 @@ export class MusicRoom {
     } finally {
       if (this.request === controller) this.request = null
     }
+  }
+
+  async playComposition(url: string) {
+    this.stop()
+    const epoch = this.epoch
+    await this.ready()
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('The saved composition could not be played.')
+    const buffer = await this.context!.decodeAudioData(await response.arrayBuffer())
+    if (epoch !== this.epoch) return false
+    this.startLoop(buffer)
+    return true
+  }
+
+  private startLoop(buffer: AudioBuffer) {
+    this.loop = this.context!.createBufferSource()
+    this.loop.buffer = buffer
+    this.loop.loop = true
+    this.loop.connect(this.gain!)
+    this.loop.start()
   }
 
   finishCapture() {

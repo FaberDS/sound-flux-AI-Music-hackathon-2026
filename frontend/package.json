@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint src tests",
     "preview": "vite preview",
     "test": "playwright test"
   },
@@ -14,6 +14,7 @@
     "@fontsource/barlow-condensed": "^5.3.0",
     "@fontsource/dm-sans": "^5.3.0",
     "@fontsource/lora": "^5.3.0",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "lucide-react": "^1.45.0",
     "react": "^19.2.8",

@@ -29,13 +29,16 @@ import {
 } from 'lucide-react'
 import { checkConnection, preseedOnboarding } from './lib/api'
 import {
+  getCompositions,
   MusicRoom,
   type CapturePhase,
   type Instrument,
   type Mood,
+  type SavedComposition,
 } from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
 import SoundFlux from './components/sound-flux/SoundFlux.jsx'
+import { MouthBeatbox } from './components/MouthBeatbox'
 import { ProfilePanel } from './components/ProfilePanel'
 import { SavedHistory } from './components/SavedHistory'
 import { useSavedData } from './hooks/useSavedData'
@@ -91,6 +94,13 @@ const amazingGraceImages = [
   amazingGraceWedding,
 ]
 
+function compositionArtwork(identifier: string) {
+  const seed = Number(identifier.split('-').at(-1))
+  return amazingGraceImages[
+    Number.isSafeInteger(seed) ? seed % amazingGraceImages.length : 0
+  ]
+}
+
 const debugPhaseText: Record<Phase, string> = {
   idle: 'Ready',
   permission: 'Opening microphone…',
@@ -106,12 +116,14 @@ function Dialog({
   title,
   children,
   dismissible = true,
+  fullPage = false,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
   dismissible?: boolean
+  fullPage?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -130,9 +142,9 @@ function Dialog({
         if (dismissible && event.target === ref.current) onClose()
       }}
       aria-label={title}
-      className="room-dialog"
+      className={`room-dialog ${fullPage ? 'journey-dialog' : ''}`}
     >
-      <div className="flex items-start justify-between gap-6">
+      <div className="dialog-header flex items-start justify-between gap-6">
         <h2 className="font-display text-4xl font-bold uppercase">{title}</h2>
         <button
           onClick={onClose}
@@ -178,13 +190,15 @@ function RecordArtwork({ active }: { active: boolean }) {
 function AmazingGraceArtwork({
   src,
   children,
+  alt = 'Music artwork',
 }: {
   src: string
   children?: ReactNode
+  alt?: string
 }) {
   return (
-    <div className="amazing-grace-art" aria-label="Amazing Grace artwork">
-      <img src={src} alt="Amazing Grace memory" />
+    <div className="amazing-grace-art" aria-label={alt}>
+      <img src={src} alt={alt} />
       {children}
     </div>
   )
@@ -209,12 +223,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [activeInstrument, setActiveInstrument] = useState<Instrument | null>(
     null,
   )
+  const [compositions, setCompositions] = useState<SavedComposition[]>([])
+  const [activeCompositionId, setActiveCompositionId] = useState<string | null>(
+    null,
+  )
+  const [musicRequest, setMusicRequest] = useState(0)
+  const [styleReady, setStyleReady] = useState(false)
   const [music] = useState(() => new MusicRoom())
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const healthRequest = useRef<AbortController | null>(null)
-  const engineStarted = useRef(false)
+  const compositionsRequest = useRef<AbortController | null>(null)
+  const handledMusicRequest = useRef(0)
   const saved = useSavedData()
   const refreshSaved = saved.refresh
+  const requestMusic = useCallback(() => setMusicRequest((value) => value + 1), [])
+  const beginMusicPreparation = useCallback(() => setStyleReady(false), [])
   const companion = useCompanion(
     saved.history,
     readAloud,
@@ -223,13 +246,19 @@ export default function App({ debug = false }: { debug?: boolean }) {
     saved.profile?.onboarding ?? null,
     saved.profile?.properties.find((property) => property.key === 'name')
       ?.value ?? '',
+    requestMusic,
+    beginMusicPreparation,
   )
+  const compositionMode = activeCompositionId !== null
+  const preparingMusicStyle = companion.playMode && !styleReady
   const busy =
     companion.phase !== 'idle' ||
     companion.continuous ||
-    (companion.playMode && (capturePhase !== 'idle' || playing))
+    compositionMode ||
+    companion.playMode
   const preparingMusicRoom = companion.playMode && companion.phase === 'speaking'
-  const showAmazingGrace = companion.playMode || (!saved.profile?.onboarding && busy)
+  const showAmazingGrace =
+    compositionMode || companion.playMode || (!saved.profile?.onboarding && busy)
   const history = mergeTurns(saved.history, companion.turns)
   const companionRef = useRef<HTMLElement | null>(null)
 
@@ -254,6 +283,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
     )
   }, [refreshSaved])
 
+  const refreshCompositions = useCallback(() => {
+    compositionsRequest.current?.abort()
+    const controller = new AbortController()
+    compositionsRequest.current = controller
+    return getCompositions(controller.signal).then(
+      (items) => {
+        if (!controller.signal.aborted) setCompositions(items)
+      },
+      () => {},
+    )
+  }, [])
+
   useEffect(() => {
     void refreshConnection()
     const interval = setInterval(() => void refreshConnection(), 30_000)
@@ -262,6 +303,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
       healthRequest.current?.abort()
     }
   }, [refreshConnection])
+  useEffect(() => {
+    void refreshCompositions()
+    return () => compositionsRequest.current?.abort()
+  }, [refreshCompositions])
   useEffect(() => {
     music.setVolume(volume)
   }, [music, volume])
@@ -274,37 +319,43 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   useEffect(() => {
     if (!companion.playMode) {
-      engineStarted.current = false
       music.stop()
       return
     }
-    if (companion.phase !== 'idle' || engineStarted.current) return
-    engineStarted.current = true
+    if (musicRequest === handledMusicRequest.current) return
+    handledMusicRequest.current = musicRequest
     let active = true
     setMusicError('')
-    setCapturePhase('recording')
-    void music.captureAndCompose(setCapturePhase).then(
-      (isPlaying) => {
-        if (active) {
-          setCapturePhase('idle')
-          setPlaying(isPlaying)
-        }
-      },
-      (error: unknown) => {
-        if (active) {
-          setCapturePhase('idle')
-          setMusicError(
-            error instanceof Error
-              ? error.message
-              : 'The audio engine could not create music.',
-          )
-        }
-      },
-    )
+    const timer = setTimeout(() => {
+      setStyleReady(true)
+      setCapturePhase('recording')
+      void music.captureAndCompose(setCapturePhase, (identifier) => {
+        setActiveCompositionId(identifier)
+        void refreshCompositions()
+      }).then(
+        (isPlaying) => {
+          if (active) {
+            setCapturePhase('idle')
+            setPlaying(isPlaying)
+          }
+        },
+        (error: unknown) => {
+          if (active) {
+            setCapturePhase('idle')
+            setMusicError(
+              error instanceof Error
+                ? error.message
+                : 'The audio engine could not create music.',
+            )
+          }
+        },
+      )
+    }, 4_000)
     return () => {
       active = false
+      clearTimeout(timer)
     }
-  }, [companion.phase, companion.playMode, music])
+  }, [companion.playMode, music, musicRequest, refreshCompositions])
 
   const playInstrument = useCallback(
     async (instrument: Instrument) => {
@@ -322,10 +373,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
     },
     [music],
   )
+  const beat = useCallback(() => music.beat(), [music])
   const stopAll = () => {
     music.stop()
     setCapturePhase('idle')
     setPlaying(false)
+    setActiveCompositionId(null)
     companion.stop()
   }
 
@@ -361,14 +414,36 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setPlaying(false)
       return
     }
-    companion.stop()
     try {
-      setPlaying(Boolean(await music.start(mood)))
+      const composition = compositions.find(
+        (item) => item.id === activeCompositionId,
+      )
+      if (!composition) companion.stop()
+      setPlaying(
+        Boolean(
+          composition
+            ? await music.playComposition(composition.url)
+            : await music.start(mood),
+        ),
+      )
       setMusicError('')
     } catch {
       setMusicError(
         'The sound could not start. Check your browser’s audio permission.',
       )
+    }
+  }
+  async function playSavedComposition(composition: SavedComposition) {
+    music.stop()
+    setPlaying(false)
+    void companion.stop()
+    setActiveCompositionId(composition.id)
+    try {
+      setPlaying(Boolean(await music.playComposition(composition.url)))
+      setMusicError('')
+    } catch {
+      setActiveCompositionId(null)
+      setMusicError('The saved composition could not be played.')
     }
   }
   async function chooseMood(next: Mood) {
@@ -385,17 +460,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
   function onMicrophone() {
+    if (preparingMusicStyle) return
     if (capturePhase === 'recording') {
       music.finishCapture()
       return
     }
     if (capturePhase === 'composing') return
-    if (companion.continuous) {
-      void companion.stop()
-      return
-    }
     if (companion.phase === 'recording') {
       companion.finishRecording()
+      return
+    }
+    if (companion.continuous) {
+      void companion.stop()
       return
     }
     music.stop()
@@ -588,7 +664,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
           </div>
           <section
             ref={companionRef}
-            className={`companion-card ${busy ? 'session-active' : ''}`}
+            className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''}`}
             aria-label="Voice companion"
             tabIndex={-1}
           >
@@ -607,8 +683,20 @@ export default function App({ debug = false }: { debug?: boolean }) {
                     : 'Voice unavailable'}
               </button>
             </div>
-            {showAmazingGrace ? (
-              <AmazingGraceArtwork src={amazingGraceImage}>
+            {preparingMusicStyle ? (
+              <div className="record-art music-preparation" role="status">
+                <SoundFlux state="thinking" size={180} showBrand={false} showStatus={false} />
+                <p>Preparing your style of music</p>
+              </div>
+            ) : showAmazingGrace ? (
+              <AmazingGraceArtwork
+                src={
+                  compositionMode
+                    ? compositionArtwork(activeCompositionId ?? '')
+                    : amazingGraceImage
+                }
+                alt={compositionMode ? 'Artwork for your saved composition' : 'Music artwork'}
+              >
                 {capturePhase === 'composing' && (
                   <div className="composer-overlay" role="status">
                     <SoundFlux
@@ -648,13 +736,15 @@ export default function App({ debug = false }: { debug?: boolean }) {
               {companion.transcript && (
                 <p className="transcript">You: {companion.transcript}</p>
               )}
-              <h2 className={companion.answer ? 'answer-text' : ''}>
-                {companion.answer ||
-                  (companion.phase === 'idle'
-                    ? welcomeText(saved.profile)
-                    : phaseText[companion.phase])}
+              <h2 className={companion.answer && !compositionMode ? 'answer-text' : ''}>
+                {compositionMode
+                  ? 'Your composition is playing'
+                  : companion.answer ||
+                    (companion.phase === 'idle'
+                      ? welcomeText(saved.profile)
+                      : phaseText[companion.phase])}
               </h2>
-              {!companion.answer && (
+              {!compositionMode && !companion.answer && (
                 <p>
                   {companion.phase === 'recording'
                     ? 'Take your time. I’ll reply after a short pause.'
@@ -664,6 +754,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 </p>
               )}
             </div>
+            {compositionMode && (
+              <>
+                <div className="composition-controls">
+                  <button className="music-button" onClick={() => void toggleMusic()}>
+                    {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                    {playing ? 'Pause music' : 'Play music'}
+                  </button>
+                  <button onClick={stopAll}>Back to your songs</button>
+                </div>
+                <MouthBeatbox active={playing} onBeat={beat} />
+              </>
+            )}
             {companion.error && (
               <p role="alert" className="error-message mt-3">
                 {companion.error}
@@ -674,6 +776,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 className={`microphone-button ${capturePhase === 'recording' || companion.phase === 'recording' ? 'recording' : ''}`}
                 onClick={onMicrophone}
                 disabled={
+                  preparingMusicStyle ||
                   capturePhase === 'composing' ||
                   preparingMusicRoom ||
                   !companion.continuous &&
@@ -691,15 +794,19 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 ) : (
                   <Mic size={21} />
                 )}
-                {capturePhase === 'recording'
+                {preparingMusicStyle
+                  ? 'Preparing your music…'
+                  : capturePhase === 'recording'
                   ? 'Humming…'
                   : capturePhase === 'composing'
                     ? 'Creating your music…'
                     : preparingMusicRoom
                       ? 'Preparing your music room…'
-                  : companion.continuous
-                  ? 'End conversation'
-                  : companion.phase === 'permission'
+                  : companion.phase === 'recording'
+                    ? 'Finish speaking'
+                    : companion.continuous
+                      ? 'End conversation'
+                      : companion.phase === 'permission'
                       ? 'Opening microphone …'
                       : companion.phase === 'transcribing'
                         ? 'Understanding words …'
@@ -769,6 +876,33 @@ export default function App({ debug = false }: { debug?: boolean }) {
             )}
           </div>
         </section>
+        {compositions.length > 0 && (
+          <section className="compositions-section" aria-labelledby="compositions-title">
+            <div className="section-heading">
+              <h2 id="compositions-title">YOUR COMPOSITIONS</h2>
+              <p>Tap a song to play it with its artwork.</p>
+            </div>
+            <div className="composition-grid">
+              {compositions.map((composition) => (
+                <button
+                  key={composition.id}
+                  className="composition-card"
+                  onClick={() => void playSavedComposition(composition)}
+                  aria-label={`Play composition from ${historyTime(composition.created_at)}`}
+                >
+                  <img src={compositionArtwork(composition.id)} alt="" />
+                  <span>
+                    <strong>Your composition</strong>
+                    <time dateTime={composition.created_at}>
+                      {historyTime(composition.created_at)}
+                    </time>
+                  </span>
+                  <Play size={19} fill="currentColor" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         <SavedHistory
           turns={history}
           loading={saved.loading}
@@ -820,52 +954,78 @@ export default function App({ debug = false }: { debug?: boolean }) {
       <Dialog
         open={dialog === 'help'}
         onClose={() => setDialog(null)}
-        title="Your moment with music"
+        title="How it works"
+        fullPage
       >
-        <p className="dialog-intro">
-          Make yourself comfortable. You decide what feels good today.
-        </p>
-        <ol className="help-steps">
+        <div className="journey-intro">
+          <p>Your musical journey</p>
+          <h3>From your story to your sound.</h3>
+          <span>
+            Sound Flux listens first, then turns the moments that matter to you
+            into music you can shape together.
+          </span>
+        </div>
+        <ol className="journey-steps">
           <li>
-            <span>1</span>
-            <div>
-              <h3>Start with a melody</h3>
+            <div className="journey-art journey-profile" aria-hidden="true">
+              <span className="profile-person"><Users size={42} /></span>
+              <span className="preference preference-one">
+                <Heart size={17} /> Favorite songs
+              </span>
+              <span className="preference preference-two">
+                <Music2 size={17} /> Your style
+              </span>
+            </div>
+            <div className="journey-copy">
+              <span>01 · Listen</span>
+              <h4>We get to know you</h4>
               <p>
-                Choose calm or bright sounds and tap “Start music”.
+                A gentle conversation helps us understand your favorite music,
+                moods, and what feels comfortable today.
               </p>
             </div>
           </li>
           <li>
-            <span>2</span>
-            <div>
-              <h3>Play along</h3>
+            <div className="journey-art journey-memories" aria-hidden="true">
+              <span className="memory-card memory-one"><Heart size={27} /></span>
+              <AudioLines className="memory-wave" size={42} />
+              <span className="memory-card memory-two"><Music2 size={27} /></span>
+            </div>
+            <div className="journey-copy">
+              <span>02 · Remember</span>
+              <h4>We revisit meaningful moments</h4>
               <p>
-                Tap an instrument. On a keyboard, keys 1 to 4 work too.
+                Together, we remember people, places, and experiences that bring
+                warmth, joy, or calm.
               </p>
             </div>
           </li>
           <li>
-            <span>3</span>
-            <div>
-              <h3>Share a little</h3>
+            <div className="journey-art journey-create" aria-hidden="true">
+              <span className="journey-record"><AudioLines size={34} /></span>
+              <span className="sound-chip sound-piano"><Piano size={21} /></span>
+              <span className="sound-chip sound-guitar"><Guitar size={21} /></span>
+              <span className="sound-chip sound-drum"><Drum size={21} /></span>
+            </div>
+            <div className="journey-copy">
+              <span>03 · Create</span>
+              <h4>We make music together</h4>
               <p>
-                Tap the microphone and speak. After a short pause, your answer
-                is sent automatically.
+                Your stories guide a personal sound. Listen, hum, or add an
+                instrument—there is no wrong way to join in.
               </p>
             </div>
           </li>
         </ol>
-        <p className="dialog-intro">
-          A short speaking pause is enough for your companion to reply. After
-          the reply, Sound Flux listens again until you end the conversation.
-        </p>
-        <p className="dialog-note">
-          “Stop everything” immediately ends music, recording, and speech.
-          If the voice companion is offline, instruments and melodies still work.
-        </p>
-        <button className="dialog-primary" onClick={() => setDialog(null)}>
-          Back to music <ArrowRight size={18} />
-        </button>
+        <div className="journey-finish">
+          <p><ShieldCheck size={16} /> Private, unhurried, and always at your pace.</p>
+          <button className="dialog-primary" onClick={() => {
+            setDialog(null)
+            onMicrophone()
+          }}>
+            Start your musical journey <ArrowRight size={18} />
+          </button>
+        </div>
       </Dialog>
       <Dialog
         open={dialog === 'profile'}

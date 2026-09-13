@@ -1,7 +1,9 @@
 import io
 import json
 import os
+import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import soundfile as sf
@@ -20,6 +22,7 @@ setup_run = {"active": False, "error": None}
 WEB = Path(__file__).resolve().parent / "web"
 SETTINGS = Path(__file__).resolve().parent / "settings.json"
 AUDIO = Path(__file__).resolve().parent / "audio"
+COMPOSITIONS = Path(__file__).resolve().parent / "compositions"
 MAX_UPLOAD = 25 * 1024 * 1024
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
@@ -93,6 +96,21 @@ def saved_settings():
         return {}
 
 
+def composition_path(identifier: str):
+    if not re.fullmatch(r"[0-9]{8}T[0-9]{12}Z-[0-9]+", identifier):
+        raise HTTPException(404, "Composition not found.")
+    return COMPOSITIONS / f"{identifier}.wav"
+
+
+def save_composition(rate, samples, seed):
+    COMPOSITIONS.mkdir(exist_ok=True)
+    identifier = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{seed}"
+    path = composition_path(identifier)
+    with path.open("xb") as output:
+        sf.write(output, samples, rate, format="WAV", subtype="PCM_16")
+    return identifier
+
+
 @app.get("/api/settings")
 def get_settings():
     return asdict(Options(**saved_settings()))
@@ -114,6 +132,29 @@ async def save_settings(request: Request):
 def samples():
     # ponytail: the browser decodes these (m4a, mp3, wav...), so the server only lists and serves them.
     return sorted(path.name for path in AUDIO.glob("*") if path.is_file() and not path.name.startswith("."))
+
+
+@app.get("/api/compositions")
+def compositions():
+    if not COMPOSITIONS.exists():
+        return []
+    return [
+        {
+            "id": path.stem,
+            "created_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+            "url": f"/api/compositions/{path.stem}",
+        }
+        for path in sorted(COMPOSITIONS.glob("*.wav"), key=lambda path: path.stat().st_mtime, reverse=True)
+        if re.fullmatch(r"[0-9]{8}T[0-9]{12}Z-[0-9]+", path.stem)
+    ]
+
+
+@app.get("/api/compositions/{identifier}", name="composition")
+def composition(identifier: str):
+    path = composition_path(identifier)
+    if not path.is_file():
+        raise HTTPException(404, "Composition not found.")
+    return FileResponse(path, media_type="audio/wav", filename=path.name)
 
 
 @app.post("/api/compose")
@@ -140,11 +181,16 @@ async def generate(audio: UploadFile = File(), settings: str = Form()):
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+    identifier = save_composition(rate, result, seed)
     output = io.BytesIO()
     sf.write(output, result, rate, format="WAV", subtype="PCM_16")
     return Response(
         output.getvalue(), media_type="audio/wav",
-        headers={"Content-Disposition": f'attachment; filename="composition-{seed}.wav"', "X-Generation-Seed": str(seed)},
+        headers={
+            "Content-Disposition": f'attachment; filename="{identifier}.wav"',
+            "X-Generation-Seed": str(seed),
+            "X-Composition-ID": identifier,
+        },
     )
 
 

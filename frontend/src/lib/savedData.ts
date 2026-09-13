@@ -44,6 +44,7 @@ export interface ProfileProperty {
 export interface ProfileState {
   greeting: string
   properties: ProfileProperty[]
+  music_preferences: { value: string }[]
   onboarding: {
     key: string
     label: string
@@ -66,7 +67,8 @@ export function profileValues(profile: ProfileState | null): ProfileValues {
     name: '',
     birth_year: '',
     mood: '',
-    music_preferences: '',
+    music_preferences:
+      profile?.music_preferences.map(({ value }) => value).join(', ') ?? '',
   }
   for (const property of profile?.properties ?? []) {
     if (Object.hasOwn(values, property.key))

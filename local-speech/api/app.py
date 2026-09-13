@@ -74,9 +74,10 @@ ONBOARDING_FOLLOW_UPS = {
         "Thank you, {name}. May I ask what year you were born?",
     ),
     "birth_year": "What music do you enjoy?",
-    "music_preferences": "Wonderful. Let's do some music.",
+    "music_preferences": "Wonderful. Let's play some music.",
 }
 MEMORABLE_ITEM_QUESTION = {"key": "memorable_item", "label": "Memorable item", "category": "Memories", "question": "What would you like to remember: a person, a song, or a movie?"}
+PLAY_MODE_EVENT = f"event: mode\ndata: {json.dumps({'value': 'play'})}\n\n"
 
 
 def synthesize_tts(model, text: str, voice: str) -> bytes:
@@ -311,7 +312,7 @@ def is_song_request(text: str) -> bool:
 
 
 def is_play_music_request(text: str) -> bool:
-    return bool(re.search(r"\b(?:let'?s|lets|can we|i want to)\s+(?:play|make|do)\b[^.!?]{0,40}\bmusic\b", text, re.I))
+    return bool(re.search(r"\b(?:let[’']?s|can we|i want to)\s+(?:play|make|do)\b[^.!?]{0,40}\bmusic\b", text, re.I))
 
 
 def next_onboarding_key(key: str | None) -> str | None:
@@ -458,7 +459,10 @@ async def run_process(turn_id: str, *command: str) -> tuple[bytes, bytes]:
     if event.is_set():
         raise HTTPException(409, "Turn interrupted")
     process = await asyncio.create_subprocess_exec(
-        *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *command,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     active_processes[turn_id].add(process)
     try:
@@ -630,10 +634,12 @@ async def live_transcription(websocket: WebSocket, turn_id: str):
             await recognize()
         except HTTPException as error:
             logger.warning("[turn %s] live transcription error: %s", turn_id, error.detail)
-            await websocket.send_json({"type": "error", "detail": error.detail})
+            with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+                await websocket.send_json({"type": "error", "detail": error.detail})
         except Exception as error:
             logger.exception("[turn %s] live transcription failed", turn_id)
-            await websocket.send_json({"type": "error", "detail": str(error)})
+            with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+                await websocket.send_json({"type": "error", "detail": str(error)})
 
     recognizer = asyncio.create_task(recognize_with_errors())
     normal_stop = False
@@ -723,7 +729,7 @@ async def chat(request: ChatRequest):
         async def play_mode_stream():
             record_interaction("assistant", answer)
             record_chat(request.turn_id, request.message, "play_mode", answer, 0)
-            yield f"event: mode\ndata: {json.dumps({'value': 'play'})}\n\n"
+            yield PLAY_MODE_EVENT
             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': answer})}\n\n"
             yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
             cancel_events.pop(request.turn_id, None)
@@ -749,6 +755,8 @@ async def chat(request: ChatRequest):
         async def onboarding_stream():
             record_interaction("assistant", follow_up)
             record_chat(request.turn_id, request.message, "onboarding", follow_up, 0)
+            if is_play_music_request(follow_up):
+                yield PLAY_MODE_EVENT
             next_key = next_onboarding_key(request.onboarding_key)
             yield f"event: onboarding\ndata: {json.dumps({'key': next_key})}\n\n"
             yield f"event: token\ndata: {json.dumps({'turn_id': request.turn_id, 'text': follow_up})}\n\n"
@@ -800,6 +808,8 @@ async def chat(request: ChatRequest):
                         assistant = "".join(answer)
                         record_interaction("assistant", assistant)
                         record_chat(request.turn_id, request.message, request.model, assistant, round((time.perf_counter() - started_at) * 1000))
+                        if is_play_music_request(assistant):
+                            yield PLAY_MODE_EVENT
                         logger.info("[turn %s] model response completed chars=%d", request.turn_id, len(assistant))
                     yield f"event: done\ndata: {json.dumps({'turn_id': request.turn_id})}\n\n"
         except asyncio.CancelledError:
