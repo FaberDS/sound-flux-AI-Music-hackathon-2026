@@ -204,9 +204,11 @@ test('controls and refreshes audio layers independently', async ({ page }) => {
 
 test('opens a saved composition in the artwork player', async ({ page }) => {
   await page.addInitScript(() => {
+    let currentTime = 0
     class Context {
       state = 'running'
       destination = {}
+      get currentTime() { return currentTime }
       async resume() {}
       createGain() {
         return {
@@ -228,6 +230,9 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
       }
     }
     Object.defineProperty(window, 'AudioContext', { value: Context })
+    Object.assign(window, {
+      advancePlayback(seconds: number) { currentTime += seconds },
+    })
   })
   await page.route('**/api/health', (route) =>
     route.fulfill({ json: { chat_model: 'test-model' } }),
@@ -280,7 +285,7 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   )
   await songsButton.click()
   await expect(page).toHaveURL(/\/songs$/)
-  await expect(page.getByRole('heading', { name: 'Your songs', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Music Memory Garden', exact: true })).toBeVisible()
   await expect(page.locator('.song-card')).toHaveCount(2)
   const names = await page.locator('.song-details strong').allTextContents()
   expect(new Set(names).size).toBe(2)
@@ -296,17 +301,24 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   await expect(page.locator('.song-card')).toHaveCount(1)
   await page.getByRole('button', { name: /Play Composition/ }).first().click()
   const cameraAlert = page.getByRole('alertdialog', {
-    name: 'Add sounds to your music?',
+    name: 'Ready to start playing?',
   })
   await expect(cameraAlert).toBeVisible()
   await expect(cameraAlert.locator('.mouth-sound-pictogram')).toBeVisible()
-  await expect(
-    cameraAlert.getByRole('button', { name: 'Connect Chordcat' }),
-  ).toBeVisible()
+  await expect(cameraAlert.getByRole('button', { name: 'Use camera' }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await expect(cameraAlert.getByRole('button', { name: 'Use Chordcat' }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.focus-play')).toContainText('Play music')
   expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()).violations).toEqual([])
-  await cameraAlert.getByRole('button', { name: 'Not now' }).click()
+  await cameraAlert.getByRole('button', { name: 'Start playing' }).click()
   const player = page.getByRole('dialog', { name: 'Voice companion' })
   await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  await player.getByRole('button', { name: 'Show all' }).click()
+  await expect(player.getByRole('button', { name: 'Connect Chordcat' }))
+    .not.toContainText('Connect music board')
+  await page.getByRole('button', { name: 'Turn camera off' }).click()
+  await page.getByRole('button', { name: 'Focus mode' }).click()
   await expect(player.getByRole('button', { name: 'Back to home' })).toBeVisible()
   await expect(player.getByRole('button', { name: 'Auto replay' })).toHaveCount(0)
   await expect(player).toHaveAttribute('aria-modal', 'true')
@@ -360,6 +372,18 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   const timeline = page.getByLabel('Composition timeline with 1 mouth effect')
   await expect(timeline).toBeVisible()
   await expect(timeline.locator('.timeline-effect')).toHaveAttribute('title', /60% volume/)
+  const playhead = timeline.getByRole('img', { name: 'Current playback position 0:00' })
+  await expect(playhead).toHaveCSS('left', '0px')
+  await page.evaluate(() =>
+    (window as unknown as { advancePlayback: (seconds: number) => void })
+      .advancePlayback(1),
+  )
+  await expect(timeline.getByRole('img', { name: 'Current playback position 0:01' }))
+    .toHaveAttribute('style', /left: 50%/)
+  await player.getByRole('button', { name: 'Pause music' }).click()
+  await expect(timeline.getByRole('img', { name: 'Current playback position 0:00' }))
+    .toHaveAttribute('style', /left: 0%/)
+  await player.getByRole('button', { name: 'Play music' }).click()
   const removeEffect = page.getByRole('button', { name: 'Remove Piano at 0:00' })
   await expect(removeEffect).toBeVisible()
   expect((await removeEffect.boundingBox())!.height).toBeGreaterThanOrEqual(44)
@@ -543,17 +567,14 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   await page.goto('/')
   const firstStartedAt = Date.now()
   await page.getByRole('button', { name: 'Talk with Sound Flux' }).click()
-  await expect(
-    page.getByText('Preparing your style of music'),
-  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Preparing your music…' })).toBeVisible()
   const stopConversation = page.getByRole('button', { name: 'Stop conversation immediately' })
   await expect(stopConversation).toBeVisible()
   const savedIcon = await page.getByRole('img', { name: 'Saved on this device.' }).boundingBox()
   const stopButton = await stopConversation.boundingBox()
   expect(savedIcon!.x + savedIcon!.width).toBeLessThan(stopButton!.x)
-  await expect(page.getByRole('img', { name: 'Music artwork' })).toHaveCount(0)
   const artwork = page.getByRole('img', { name: 'Music artwork' })
-  await expect(artwork).toBeVisible({ timeout: 5_000 })
+  await expect(artwork).toBeVisible()
   const artworkSource = await artwork.getAttribute('src')
   await expect(page.getByRole('dialog', { name: 'Voice companion' })).toHaveClass(/focus-mode/)
   await expect(page.getByRole('button', { name: 'Humming…' })).toBeVisible()
@@ -563,7 +584,7 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   ).toHaveClass(/session-active/)
   await expect.poll(() => uploads).toBe(1)
   expect(body).toContain('name="audio"')
-  await page.getByRole('alertdialog', { name: 'Add sounds to your music?' })
+  await page.getByRole('alertdialog', { name: 'Ready to start playing?' })
     .getByRole('button', { name: 'Not now' }).click()
   const player = page.getByRole('dialog', { name: 'Voice companion' })
   await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()

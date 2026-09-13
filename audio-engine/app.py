@@ -5,6 +5,7 @@ import os
 import re
 import threading
 import uuid
+from asyncio import sleep
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -390,6 +391,7 @@ async def generate(audio: UploadFile = File(), settings: str = Form()):
             raise ValueError("Generation settings are too long.")
         options = Options(**(saved_settings() | json.loads(settings)))
         if options.use_default:
+            await sleep(4)
             with sf.SoundFile(default_audio_path(options)) as handle:
                 if handle.channels not in (1, 2):
                     raise ValueError("Default audio must be mono or stereo.")

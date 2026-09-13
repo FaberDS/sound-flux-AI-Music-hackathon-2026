@@ -171,6 +171,7 @@ export class MusicRoom {
   private voices = new Set<AudioScheduledSourceNode>()
   private loop: AudioBufferSourceNode | null = null
   private effectsLoop: AudioBufferSourceNode | null = null
+  private preparedLoop: AudioBuffer | null = null
   private loopStartedAt = 0
   private loopDuration = 0
   private compositionRefresh = 0
@@ -237,6 +238,14 @@ export class MusicRoom {
     this.autoReplay = value
     if (this.loop) this.loop.loop = value
     if (this.effectsLoop) this.effectsLoop.loop = value
+  }
+
+  getPlaybackPosition() {
+    if (!this.context || !this.loop || !this.loopDuration) return 0
+    const elapsed = Math.max(0, this.context.currentTime - this.loopStartedAt)
+    return this.autoReplay
+      ? elapsed % this.loopDuration
+      : Math.min(elapsed, this.loopDuration)
   }
 
   async pause() {
@@ -365,6 +374,7 @@ export class MusicRoom {
   async captureAndCompose(
     onCapturePhaseChange: (phase: CapturePhase) => void,
     onComposition?: (identifier: string) => void,
+    autoPlay = true,
   ) {
     this.stop()
     const epoch = this.epoch
@@ -374,7 +384,13 @@ export class MusicRoom {
       return false
     }
     this.capturedAudio = audio
-    return this.compose(audio, epoch, onCapturePhaseChange, onComposition)
+    return this.compose(
+      audio,
+      epoch,
+      onCapturePhaseChange,
+      onComposition,
+      autoPlay,
+    )
   }
 
   canRegenerate(identifier: string | null) {
@@ -405,6 +421,7 @@ export class MusicRoom {
     epoch: number,
     onCapturePhaseChange: (phase: CapturePhase) => void,
     onComposition?: (identifier: string) => void,
+    autoPlay = true,
   ) {
     const controller = new AbortController()
     this.request = controller
@@ -432,14 +449,15 @@ export class MusicRoom {
         await response.arrayBuffer(),
       )
       if (epoch !== this.epoch) return false
-      this.startLoop(buffer)
+      if (autoPlay) this.startLoop(buffer)
+      else this.preparedLoop = buffer
       const identifier = response.headers.get('X-Composition-ID')
       if (identifier) {
         this.capturedCompositionId = identifier
         onComposition?.(identifier)
       }
       onCapturePhaseChange('idle')
-      return true
+      return autoPlay
     } catch (error) {
       onCapturePhaseChange('idle')
       if (epoch !== this.epoch || controller.signal.aborted) return false
@@ -447,6 +465,14 @@ export class MusicRoom {
     } finally {
       if (this.request === controller) this.request = null
     }
+  }
+
+  startPreparedComposition() {
+    if (!this.preparedLoop || !this.context) return false
+    const buffer = this.preparedLoop
+    this.preparedLoop = null
+    this.startLoop(buffer)
+    return true
   }
 
   async playComposition(url: string, effectsUrl?: string) {
@@ -686,6 +712,7 @@ export class MusicRoom {
     this.timer = null
     this.request?.abort()
     this.request = null
+    this.preparedLoop = null
     this.onCapturePhaseChange?.('idle')
     this.onCapturePhaseChange = null
     const recorder = this.recorder

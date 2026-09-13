@@ -251,9 +251,11 @@ function AmazingGraceArtwork({
 
 function CompositionTimeline({
   composition,
+  playbackPosition,
   onRemove,
 }: {
   composition?: SavedComposition
+  playbackPosition: number
   onRemove: (effectId: string) => void
 }) {
   if (!composition?.duration) return null
@@ -262,11 +264,18 @@ function CompositionTimeline({
   return (
     <div
       className="composition-timeline"
+      role="region"
       aria-label={`Composition timeline with ${composition.effects.length} mouth ${composition.effects.length === 1 ? 'effect' : 'effects'}`}
     >
-      <div className="timeline-scale" aria-hidden="true">
+      <div className="timeline-scale">
         <span>0:00</span>
         <div className="timeline-track">
+          <span
+            className="timeline-playhead"
+            role="img"
+            aria-label={`Current playback position ${time(playbackPosition)}`}
+            style={{ left: `${Math.max(0, Math.min(100, playbackPosition / composition.duration * 100))}%` }}
+          />
           {composition.effects.map((effect) => {
             const option = instruments.find(({ id }) => id === effect.effect)
             const Icon = option?.icon ?? Drum
@@ -323,11 +332,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
+  const [playbackPosition, setPlaybackPosition] = useState(0)
   const [focusMode, setFocusMode] = useState(true)
   const [autoReplay, setAutoReplay] = useState(true)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
   const [cameraEnabled, setCameraEnabled] = useState(false)
   const [cameraPromptOpen, setCameraPromptOpen] = useState(false)
+  const [cameraSelected, setCameraSelected] = useState(true)
+  const [chordcatSelected, setChordcatSelected] = useState(true)
+  const [startingPlayback, setStartingPlayback] = useState(false)
+  const [pendingPlayback, setPendingPlayback] = useState<
+    SavedComposition | 'generated' | null
+  >(null)
   const [completionPromptOpen, setCompletionPromptOpen] = useState(false)
   const [volume, setVolume] = useState(0.45)
   const [layerVolumes, setLayerVolumes] = useState(savedLayerVolumes)
@@ -342,9 +358,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [defaultAudioFiles, setDefaultAudioFiles] = useState<string[]>([])
   const [musicSettingsStatus, setMusicSettingsStatus] = useState('Loading music settings…')
   const [seeding, setSeeding] = useState(false)
-  const [amazingGraceImage] = useState(
-    () => amazingGraceImages[Math.floor(Math.random() * amazingGraceImages.length)],
-  )
+  const amazingGraceImage = amazingGraceChurch
   const [activeInstrument, setActiveInstrument] = useState<Instrument | null>(
     null,
   )
@@ -367,7 +381,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const healthRequest = useRef<AbortController | null>(null)
   const compositionsRequest = useRef<AbortController | null>(null)
   const handledMusicRequest = useRef(0)
-  const cameraPromptShown = useRef(false)
   const saved = useSavedData()
   const refreshSaved = saved.refresh
   const requestMusic = useCallback(() => setMusicRequest((value) => value + 1), [])
@@ -405,7 +418,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const previousPage = useRef(page)
 
   useEffect(() => {
-    document.title = page === 'songs' ? 'Your songs · Sound Flux' : 'Sound Flux · Your music room'
+    document.title = page === 'songs' ? 'Music Memory Garden · Sound Flux' : 'Sound Flux · Your music room'
     if (previousPage.current !== page) {
       document.getElementById('musikraum')?.focus({ preventScroll: true })
       previousPage.current = page
@@ -443,13 +456,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
       else document.getElementById('musikraum')?.focus({ preventScroll: true })
     }
   }, [busy])
-  useEffect(() => {
-    if (compositionMode && !cameraPromptShown.current) {
-      cameraPromptShown.current = true
-      setCameraPromptOpen(true)
-    }
-  }, [compositionMode])
-
   const refreshConnection = useCallback(() => {
     healthRequest.current?.abort()
     const controller = new AbortController()
@@ -529,6 +535,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
     music.setEffectsVolume(layerVolumes.effects)
   }, [layerVolumes, music])
   useEffect(() => {
+    if (!playing || !compositionMode) return
+    const update = () => setPlaybackPosition(music.getPlaybackPosition())
+    const interval = setInterval(update, 100)
+    return () => clearInterval(interval)
+  }, [compositionMode, music, playing])
+  useEffect(() => {
     if (!playing || !compositionMode || completionPromptOpen) return
     let active = true
     const timer = setTimeout(() => {
@@ -566,8 +578,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
       void music.captureAndCompose(setCapturePhase, (identifier) => {
         setFocusMode(true)
         setActiveCompositionId(identifier)
+        setCameraSelected(true)
+        setChordcatSelected(true)
+        setPendingPlayback('generated')
+        setCameraPromptOpen(true)
         void refreshCompositions()
-      }).then(
+      }, false).then(
         (isPlaying) => {
           if (active) {
             setCapturePhase('idle')
@@ -679,6 +695,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const stopAll = () => {
     music.stop()
     setCameraEnabled(false)
+    setCameraPromptOpen(false)
+    setPendingPlayback(null)
     setCapturePhase('idle')
     setPlaying(false)
     setFocusMode(true)
@@ -716,6 +734,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
     if (playing) {
       music.stop()
       setPlaying(false)
+      return
+    }
+    if (pendingPlayback) {
+      setCameraPromptOpen(true)
       return
     }
     try {
@@ -763,22 +785,43 @@ export default function App({ debug = false }: { debug?: boolean }) {
       )
     }
   }
-  async function playSavedComposition(composition: SavedComposition) {
+  function playSavedComposition(composition: SavedComposition) {
     music.stop()
     setPlaying(false)
     void companion.stop()
     setFocusMode(true)
     setActiveCompositionId(composition.id)
+    setCameraSelected(true)
+    setChordcatSelected(true)
+    setPendingPlayback(composition)
+    setCameraPromptOpen(true)
     navigatePage('home')
+  }
+  async function startPendingPlayback(useSelectedDevices = true) {
+    const pending = pendingPlayback
+    if (!pending) return
+    setStartingPlayback(true)
+    const useCamera = useSelectedDevices && cameraSelected
+    const useChordcat = useSelectedDevices && chordcatSelected
+    setCameraEnabled(useCamera)
+    if (useChordcat && !chordcat.connected) await chordcat.connect()
+    else if (!useChordcat && chordcat.connected) chordcat.disconnect()
     try {
-      setPlaying(Boolean(await music.playComposition(
-        composition.url,
-        composition.effects.length ? composition.effectsUrl : undefined,
-      )))
+      const started = pending === 'generated'
+        ? music.startPreparedComposition()
+        : await music.playComposition(
+            pending.url,
+            pending.effects.length ? pending.effectsUrl : undefined,
+          )
+      if (!started) throw new Error('No composition is ready.')
+      setPlaying(true)
       setMusicError('')
     } catch {
-      setActiveCompositionId(null)
       setMusicError('The saved composition could not be played.')
+    } finally {
+      setPendingPlayback(null)
+      setCameraPromptOpen(false)
+      setStartingPlayback(false)
     }
   }
   async function continueComposition() {
@@ -1208,7 +1251,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
           <div className="songs-heading">
             <div>
               <p>Your music library</p>
-              <h1>Your songs</h1>
+              <h1>Music Memory Garden</h1>
               <span>Play the music you created with Sound Flux.</span>
             </div>
             {compositions.length > 0 && (
@@ -1360,12 +1403,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 </button>
               )}
             </div>}
-            {preparingMusicStyle ? (
-              <div className="record-art music-preparation" role="status">
-                <SoundFlux state="thinking" size={180} showBrand={false} showStatus={false} />
-                <p>Preparing your style of music</p>
-              </div>
-            ) : showAmazingGrace ? (
+            {showAmazingGrace ? (
               <AmazingGraceArtwork
                 src={
                   compositionMode && !companion.playMode
@@ -1399,6 +1437,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
             ) : companion.phase !== 'idle' ? (
               <div className="record-art">
                 <SoundFlux
+                  className="voice-indicator"
                   state={
                     companion.phase === 'speaking'
                       ? 'speaking'
@@ -1543,6 +1582,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
             {compositionMode && (
               <CompositionTimeline
                 composition={activeComposition}
+                playbackPosition={playing ? playbackPosition : 0}
                 onRemove={removeEffect}
               />
             )}
@@ -1747,7 +1787,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
       <Dialog
         open={cameraPromptOpen}
         onClose={() => setCameraPromptOpen(false)}
-        title="Add sounds to your music?"
+        title="Ready to start playing?"
+        dismissible={!startingPlayback}
         alert
       >
         <div className="camera-alert-copy">
@@ -1780,33 +1821,55 @@ export default function App({ debug = false }: { debug?: boolean }) {
             </svg>
           </span>
           <p>
-            Use the camera for mouth sounds or connect your Chordcat music
-            board. Camera video is processed on this device and never recorded.
+            Camera and Chordcat controls are ready to turn on. Camera video is
+            processed on this device and never recorded.
           </p>
         </div>
         <div className="camera-alert-actions">
           <button
             type="button"
-            className="dialog-primary"
-            onClick={() => {
-              setCameraPromptOpen(false)
-              setCameraEnabled(true)
-            }}
+            className={`camera-permission ${cameraSelected ? 'online' : ''}`}
+            aria-label="Use camera"
+            aria-pressed={cameraSelected}
+            onClick={() => setCameraSelected(!cameraSelected)}
+            disabled={startingPlayback}
           >
-            <Camera size={20} /> Enable camera
+            {cameraSelected ? <Camera size={20} /> : <CameraOff size={20} />}
+            <span className="camera-copy">
+              <strong>Camera</strong>
+              <span>{cameraSelected ? 'On when music starts' : 'Off'}</span>
+            </span>
           </button>
           <button
             type="button"
-            className="dialog-primary"
-            onClick={() => {
-              setCameraPromptOpen(false)
-              if (!chordcat.connected) void chordcat.connect()
-            }}
+            className={`camera-permission chordcat-permission ${chordcatSelected ? 'online' : ''}`}
+            aria-label="Use Chordcat"
+            aria-pressed={chordcatSelected}
+            onClick={() => setChordcatSelected(!chordcatSelected)}
+            disabled={startingPlayback}
           >
-            {chordcat.connected ? <Check size={20} /> : <Cable size={20} />}
-            {chordcat.connected ? 'Use Chordcat' : 'Connect Chordcat'}
+            {chordcatSelected ? <Cable size={20} /> : <X size={20} />}
+            <span className="camera-copy">
+              <strong>Chordcat</strong>
+              <span>{chordcatSelected ? 'Connect when music starts' : 'Off'}</span>
+            </span>
           </button>
-          <button type="button" onClick={() => setCameraPromptOpen(false)}>
+          <button
+            type="button"
+            className="dialog-primary camera-alert-start"
+            onClick={() => void startPendingPlayback()}
+            disabled={startingPlayback}
+          >
+            {startingPlayback
+              ? <LoaderCircle className="animate-spin" size={20} />
+              : <Play size={20} fill="currentColor" />}
+            {startingPlayback ? 'Starting…' : 'Start playing'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void startPendingPlayback(false)}
+            disabled={startingPlayback}
+          >
             Not now
           </button>
         </div>

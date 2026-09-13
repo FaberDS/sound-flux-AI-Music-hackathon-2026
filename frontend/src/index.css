@@ -533,7 +533,7 @@
     justify-self: center;
   }
   .session-active .record-art {
-    height: clamp(160px, 30dvh, 320px);
+    height: 50dvh;
     margin: 0;
     overflow: hidden;
   }
@@ -580,15 +580,19 @@
     margin: 0 -16px 8px;
     overflow: hidden;
   }
-  .music-preparation {
-    align-content: center;
-    gap: 14px;
+  .voice-indicator {
+    position: relative;
+    align-self: stretch;
+    width: 100%;
+    min-height: 0;
   }
-  .music-preparation > p {
-    margin: 0;
-    color: var(--color-brown);
-    font-size: 1.25rem;
-    font-weight: 700;
+  .voice-indicator > div {
+    position: absolute;
+    inset: 0;
+    width: auto !important;
+    height: 100%;
+    margin: auto;
+    aspect-ratio: 1;
   }
   .amazing-grace-art {
     position: relative;
@@ -1004,6 +1008,18 @@
     right: 0;
     left: 0;
     border-top: 3px solid var(--color-control-line);
+  }
+  .timeline-playhead {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    width: 18px;
+    height: 18px;
+    border: 3px solid white;
+    border-radius: 50%;
+    background: var(--color-brown);
+    box-shadow: 0 0 0 2px var(--color-yellow);
+    transform: translate(-50%, -50%);
   }
   .timeline-effect {
     position: absolute;
@@ -1909,6 +1925,9 @@
     padding: 12px 18px;
     color: var(--color-brown);
     font-weight: 700;
+  }
+  .camera-alert-start {
+    grid-column: 1 / -1;
   }
   .profile-form {
     display: grid;

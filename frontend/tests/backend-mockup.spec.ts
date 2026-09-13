@@ -60,6 +60,7 @@ test('saved songs play real WAVs, remove effects, and support deletion and empty
 
 test('live onboarding flows through SSE and speech into humming, setup and a saved composition', async ({ page, request }) => {
   await page.clock.install()
+  await page.setViewportSize({ width: 1356, height: 657 })
   await control(request, 'reset', { preset: 'empty' })
   await control(request, 'config', { delayMs: 10, tokenMs: 10, liveMs: 100, speechSeconds: 0.2, composeMs: 1200, engine: 'cold' })
   // Keep real getUserMedia, MediaRecorder, audio decoding, WS and HTTP. Only
@@ -74,16 +75,24 @@ test('live onboarding flows through SSE and speech into humming, setup and a sav
   await page.getByRole('button', { name: 'Talk with Sound Flux', exact: true }).click()
   for (const text of ['Alex', '1950', 'Jazz and piano']) {
     await expect(page.locator('.transcript')).toHaveText(`You: ${text}`, { timeout: 10_000 })
+    if (text === 'Alex') {
+      const artwork = (await page.locator('.record-art > div').boundingBox())!
+      const message = (await page.locator('.companion-message').boundingBox())!
+      expect(artwork.height).toBeGreaterThanOrEqual(657 / 2)
+      expect(artwork.y + artwork.height).toBeLessThanOrEqual(message.y)
+    }
     await page.getByRole('button', { name: 'Finish speaking', exact: true }).click()
     await expect.poll(async () => (await (await request.get('/api/v1/history')).json()).items[0]?.user).toBe(text)
   }
-  const player = page.getByRole('region', { name: 'Voice companion' })
+  const player = page.getByRole('dialog', { name: 'Voice companion' })
   await expect(player.getByRole('img', { name: 'Music artwork' })).toBeVisible()
   await expect(player).toHaveClass(/focus-mode/)
   await expect(page.getByRole('button', { name: 'Humming…', exact: true })).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(1200)
   await page.evaluate(() => { (window as unknown as { mockHum: { amplitude: number } }).mockHum.amplitude = 0 })
   await expect(page.locator('.composer-overlay')).toBeVisible()
+  await page.getByRole('alertdialog', { name: 'Ready to start playing?' })
+    .getByRole('button', { name: 'Not now' }).click()
   await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible({ timeout: 15_000 })
   await page.clock.fastForward(15_000)
   const completion = page.getByRole('alertdialog', { name: 'Is your music complete?' })

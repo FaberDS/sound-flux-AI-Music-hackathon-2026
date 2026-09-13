@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import soundfile as sf
@@ -325,9 +325,10 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/settings", json=bad).status_code, 400)
         self.assertEqual(self.client.get("/api/settings").json()["prompt"], "Dark synth")
 
+    @patch("app.sleep", new_callable=AsyncMock)
     @patch("app.compose")
     @patch("app.require_ready", side_effect=RuntimeError("Setup required"))
-    def test_default_audio_skips_model_generation(self, ready, generate):
+    def test_default_audio_skips_model_generation(self, ready, generate, sleep):
         saved = self.client.post("/api/settings", json={
             "prompt": "Piano", "use_default": True, "default_file": "default_sound.wav",
         })
@@ -343,6 +344,7 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual((rate, audio.shape), (8000, (8000, 2)))
         generate.assert_not_called()
         ready.assert_not_called()
+        sleep.assert_awaited_once_with(4)
         self.assertEqual(self.client.get("/api/assets").json(), ["default_sound.wav"])
         self.assertEqual(self.client.post("/api/settings", json={
             "prompt": "Piano", "use_default": True, "default_file": "missing.wav",
