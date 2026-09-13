@@ -4,7 +4,15 @@ Ein Musikraum mit React, TypeScript, Vite und Tailwind CSS. Die Gestaltung über
 
 ## Starten
 
-Vom Repository-Root startet `./start.sh` das Frontend und installiert bei Bedarf die Abhängigkeiten. Weitere Team-Services können später im Skript ergänzt werden. `Ctrl+C` beendet die darüber gestarteten Prozesse. Siehe [gemeinsame Startanleitung](../README.md).
+Für Frontend-Arbeit ohne Sprach- und Musikmodelle im Repository-Root
+`./start-dev.sh` ausführen. Das startet das Frontend auf Port 5173 und
+`backend-mockup` auf Port 8001. Die [Mock-Steuerung](http://127.0.0.1:8001/?frontendPort=5173)
+bietet Beispieldaten, leeres Onboarding, Transkripte, Wartezeiten und Fehlerfälle.
+Frontend-Änderungen lädt Vite sofort; der Mock bleibt dabei aktiv.
+Siehe [Mock-Anleitung und Testabläufe](../backend-mockup/README.md).
+`npm run test:mock` prüft das Frontend gegen einen separat gestarteten Mock.
+
+Für die echten Modelle startet `./start.sh` vom Repository-Root das Frontend, die Sprach-API und die Audio-Engine. Das Skript installiert bei Bedarf die Frontend-Abhängigkeiten. `Ctrl+C` beendet die darüber gestarteten Prozesse. Siehe [gemeinsame Startanleitung](../README.md).
 
 Für den separaten Frontend-Start:
 

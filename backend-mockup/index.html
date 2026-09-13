@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Flux · Mock-Steuerung</title>
+<style>
+  :root { color-scheme: light; --paper:#fff8e5; --ink:#432c20; --yellow:#f6ce4b; --orange:#df713f; --line:#d5bd99; --white:#fffdf7; font-family:system-ui,sans-serif; color:var(--ink); background:var(--paper) }
+  * { box-sizing:border-box } body { max-width:1100px; margin:auto; padding:32px 24px } header { display:flex; align-items:center; justify-content:space-between; gap:20px; border-bottom:3px solid var(--ink); padding-bottom:22px }
+  h1 { margin:4px 0; font-family:'Arial Narrow',Impact,sans-serif; font-stretch:condensed; font-size:clamp(32px,5vw,54px); text-transform:uppercase } h2 { font-size:20px; margin-top:0 } p { line-height:1.6 } .eyebrow,code,pre { font-family:ui-monospace,monospace } .eyebrow { font-size:12px; letter-spacing:.1em }
+  a { color:inherit } main { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:24px } section { padding:24px; background:var(--white); border:1px solid var(--line); border-radius:12px; min-width:0 } .wide { grid-column:1/-1 }
+  label { display:block; margin:16px 0 6px; font-size:14px; font-weight:600 } input,textarea,select { width:100%; color:inherit; border:1px solid var(--line); border-radius:6px; background:white; padding:11px; font:inherit } textarea { min-height:86px; resize:vertical } input[type=checkbox] { width:auto; margin-right:8px }
+  button,.link { min-height:44px; padding:10px 16px; border:1px solid var(--ink); border-radius:6px; font:600 14px system-ui,sans-serif; cursor:pointer; background:var(--yellow); color:var(--ink); display:inline-flex; align-items:center; justify-content:center; text-decoration:none } button:hover,.link:hover { background:var(--orange) } button:disabled { opacity:.5; cursor:wait } :focus-visible { outline:3px solid var(--orange); outline-offset:3px }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px } .secondary { background:transparent } .numbers { display:grid; grid-template-columns:1fr 1fr; gap:0 18px } .hint { font-size:13px; line-height:1.5; margin:8px 0; color:#705745 } #status { min-height:28px; margin:16px 0; font-weight:600 } #status[data-error=true] { color:#9b2917 } #errors { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px } #errors label { margin:5px 0; font-weight:400; overflow-wrap:anywhere } pre { overflow:auto; font-size:12px; line-height:1.7; max-height:330px } #counts { display:flex; gap:24px; flex-wrap:wrap; padding:16px 0; border-bottom:1px solid var(--line) } #counts strong { font-size:26px; display:block } details { margin-top:18px } summary { cursor:pointer }
+  @media(max-width:700px) { body { padding:20px 14px } header { align-items:flex-start; flex-direction:column } main { grid-template-columns:1fr } section { padding:18px } }
+</style>
+<header><div><span class="eyebrow">SOUND FLUX / ENTWICKLUNG</span><h1>Backend-Mockup</h1><div>Sprache, Gespräche und Musik ohne Modellstart testen.</div></div><a class="link" id="frontend" href="http://localhost:5173" target="_blank" rel="noopener">Frontend öffnen ↗</a></header>
+<p id="status" role="status" aria-live="polite">Verbinde mit dem Mock …</p>
+<main>
+  <section><h2>Testdaten</h2><p>Profil, Verlauf und drei abspielbare Songs sind vorbereitet. Änderungen bleiben auch nach einem Neustart gespeichert.</p><div class="actions"><button data-reset="demo">Beispieldaten laden</button><button class="secondary" data-reset="empty">Alles leer / Onboarding</button></div><p class="hint">Ersetzt ausschließlich Mock-Daten. Danach das Frontend neu laden. Die echte Datenbank bleibt unberührt.</p><div id="counts"></div><details><summary>Gespeichertes Profil ansehen</summary><pre id="profile"></pre></details></section>
+  <section><h2>Mikrofon & Antwort</h2><label for="transcript">Simulierter gesprochener Satz</label><textarea id="transcript" placeholder="Leer: passende Antwort für den aktuellen Onboarding-Schritt"></textarea><label><input id="silence" type="checkbox">Stille simulieren, leeres Transkript</label><label for="reply">Feste Chat-Antwort</label><textarea id="reply" placeholder="Leer: automatische Beispielantwort"></textarea><div class="actions"><button id="save-text">Übernehmen</button><button class="secondary" id="send-transcript">Live-Satz senden</button></div><p class="hint">Im Frontend das Mikrofon öffnen. „Live-Satz senden“ beendet die aktuelle Aufnahme mit diesem Text. Ohne aktive Aufnahme gilt der Text für die nächste. Automatisch folgen Alex, 1950, Jazz und dann „Let's play music.“</p><p class="hint">Sprachausgabe liefert kurze Testtöne als WAV. Aufnahme, Abspielzustand, Wiederholen und Stoppen funktionieren damit ohne Sprachmodell. Kamerazugriff und Instrumente laufen weiterhin im Browser.</p></section>
+  <section><h2>Wartezeiten & Startzustand</h2><div class="actions"><button data-scenario="normal">Normal</button><button class="secondary" data-scenario="slow">Langsam</button><button class="secondary" data-scenario="offline">API offline</button></div><div class="numbers"><div><label for="delayMs">HTTP-Verzögerung, ms</label><input id="delayMs" type="number" min="0" max="30000"></div><div><label for="tokenMs">Pause pro Chat-Wort, ms</label><input id="tokenMs" type="number" min="0" max="30000"></div><div><label for="composeMs">Musikgenerierung, ms</label><input id="composeMs" type="number" min="0" max="30000"></div><div><label for="liveMs">Live-Transkript, ms</label><input id="liveMs" type="number" min="0" max="30000"></div><div><label for="speechSeconds">Sprachausgabe, Sekunden</label><input id="speechSeconds" type="number" min="0.1" max="30" step="0.1"></div><div><label for="engine">Audio-Engine</label><select id="engine"><option value="ready">Bereit</option><option value="cold">Setup erforderlich</option><option value="error">Setup fehlgeschlagen</option></select></div></div><div class="actions"><button id="save-timing">Übernehmen</button></div></section>
+  <section><h2>Fehler auslösen</h2><p class="hint">Aktive Fehler bleiben bis zum Ausschalten bestehen. Lesen und Speichern lassen sich getrennt testen.</p><div id="errors"></div><div class="actions"><button id="save-errors">Fehler übernehmen</button><button class="secondary" id="clear-errors">Alle Fehler ausschalten</button></div></section>
+  <section class="wide"><h2>Anfragen</h2><p class="hint">Die letzten 100 Anfragen. Aktualisierung alle zwei Sekunden. Mock-Einstellungen gelten sofort, Testdaten werden vom Frontend beim nächsten Abruf geladen.</p><pre id="logs" aria-label="Letzte Anfragen"></pre></section>
+</main>
+<script type="module">
+  const byId = (id) => document.getElementById(id)
+  const numeric = ['delayMs', 'tokenMs', 'composeMs', 'liveMs', 'speechSeconds']
+  let initial = true
+  const status = (text, error = false) => { byId('status').textContent = text; byId('status').dataset.error = String(error) }
+  const frontendPort = new URL(location.href).searchParams.get('frontendPort')
+  if (/^\d+$/.test(frontendPort) && Number(frontendPort) > 0 && Number(frontendPort) <= 65535) byId('frontend').href = `http://localhost:${frontendPort}`
+  async function api(path, body) {
+    const response = await fetch(path, body === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    const data = await response.json()
+    if (!response.ok) throw Error(data.detail || 'Mock-Anfrage fehlgeschlagen.')
+    return data
+  }
+  function fill(config) {
+    for (const key of [...numeric, 'engine', 'transcript', 'reply']) byId(key).value = config[key]
+    byId('silence').checked = config.silence
+    for (const input of document.querySelectorAll('[data-error-key]')) input.checked = config.errors.includes(input.dataset.errorKey)
+  }
+  async function refresh() {
+    const state = await api('/__mock')
+    if (initial) {
+      for (const key of state.failureKeys) {
+        const label = document.createElement('label'), input = document.createElement('input')
+        input.type = 'checkbox'; input.dataset.errorKey = key; label.append(input, key); byId('errors').append(label)
+      }
+      fill(state.config); initial = false; status('Mock bereit. Frontend öffnen und loslegen.')
+    }
+    byId('profile').textContent = JSON.stringify(state.profile, null, 2)
+    byId('counts').replaceChildren(...[[state.profile.properties.length, 'Profilwerte'], [state.history.length, 'Gespräche'], [state.compositions.length, 'Songs'], [state.activeTurns.length, 'Live-Mikrofone']].map(([count, label]) => { const item = document.createElement('span'), strong = document.createElement('strong'); strong.textContent = count; item.append(strong, label); return item }))
+    byId('logs').textContent = state.logs.map((entry) => `${entry.time.slice(11,19)}  ${String(entry.status).padEnd(4)} ${entry.method.padEnd(6)} ${entry.path}`).join('\n') || 'Noch keine Anfragen. Öffne das Frontend.'
+  }
+  async function action(work, message = 'Einstellungen übernommen.') {
+    try { await work(); await refresh(); status(message) } catch (error) { status(error.message, true) }
+  }
+  const configure = (patch) => api('/__mock/config', patch).then(fill)
+  byId('save-text').onclick = () => action(() => configure({ transcript:byId('transcript').value, reply:byId('reply').value, silence:byId('silence').checked }))
+  byId('send-transcript').onclick = () => action(() => api('/__mock/transcript', { text:byId('transcript').value }), 'Live-Satz gesendet oder für die nächste Aufnahme übernommen.')
+  byId('save-timing').onclick = () => action(() => configure({ ...Object.fromEntries(numeric.map((key) => [key, Number(byId(key).value)])), engine:byId('engine').value }))
+  byId('save-errors').onclick = () => action(() => configure({ errors:[...document.querySelectorAll('[data-error-key]:checked')].map((input) => input.dataset.errorKey) }))
+  byId('clear-errors').onclick = () => action(() => configure({ errors:[] }))
+  for (const button of document.querySelectorAll('[data-reset]')) button.onclick = () => action(async () => { await api('/__mock/reset', { preset:button.dataset.reset }); fill((await api('/__mock')).config) }, 'Testdaten ersetzt. Jetzt das Frontend neu laden.')
+  for (const button of document.querySelectorAll('[data-scenario]')) button.onclick = () => action(async () => {
+    const normal = { delayMs:180, tokenMs:45, composeMs:1800, liveMs:700, speechSeconds:2, engine:'ready', errors:[] }
+    const scenario = button.dataset.scenario
+    if (scenario === 'slow') Object.assign(normal, { delayMs:2200, tokenMs:400, composeMs:12000 })
+    if (scenario === 'offline') normal.errors = (await api('/__mock')).failureKeys
+    await configure(normal)
+  })
+  await action(refresh, 'Mock bereit. Frontend öffnen und loslegen.')
+  setInterval(() => refresh().catch(() => status('Mock nicht erreichbar. Mit ./start-dev.sh starten.', true)), 2000)
+</script>
+</html>

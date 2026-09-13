@@ -363,6 +363,8 @@ export function useCompanion(
           if (message.type === 'error')
             fail(new Error(message.detail || 'The recording could not be processed.'), turn)
           if (message.type === 'final') {
+            // A final result can also arrive before the user presses Stop.
+            clearCapture()
             const text = typeof message.text === 'string' ? message.text.trim() : ''
             if (text) void respond(text, turn)
             else if (continuousRef.current)

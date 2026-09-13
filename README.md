@@ -29,6 +29,21 @@ Speech, profile data, and generated music stay on the local machine.
 
 ## Run the project
 
+For frontend development without loading any models, run:
+
+```sh
+./start-dev.sh
+```
+
+This starts the frontend on [localhost:5173](http://localhost:5173) and a small
+mock for both backend services. Open the [mock controls](http://127.0.0.1:8001/?frontendPort=5173)
+to load example profiles and songs, restart onboarding, or simulate delays and
+errors. Only Node.js 22.12 or newer and npm are needed; mock data persists separately.
+See [backend-mockup/README.md](backend-mockup/README.md) for the test flows and
+simulation limits. `Ctrl+C` stops both services.
+
+To run with the real speech and music models, use the setup below.
+
 You need macOS on Apple Silicon, Node.js 22.12 or newer, npm,
 [`uv`](https://docs.astral.sh/uv/), Ollama, and FFmpeg. Follow the one-time model
 setup in [`local-speech/README.md`](local-speech/README.md) and
@@ -51,12 +66,14 @@ FRONTEND_PORT=5174 ./start.sh
 
 ```text
 frontend/      Current React application
+backend-mockup/ Lightweight speech and music APIs for frontend development
 local-speech/  Local transcription, conversation, and text-to-speech
 audio-engine/  Local humming-to-music generation
 denis-v1/      Draft 1: camera and head-gesture instrument
 denis-v2/      Draft 2: memory-focused music session
 sensors/       Arduino sensor experiment
 start.sh       Shared development launcher
+start-dev.sh   Frontend and mock launcher, without model loading
 ```
 
 For development commands, API details, and tests, see the README in each
