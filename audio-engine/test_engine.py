@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import tempfile
@@ -344,6 +345,14 @@ class InterfaceTests(unittest.TestCase):
         })
         mixed, _ = sf.read(composition_path(identifier))
         self.assertGreater(np.max(np.abs(mixed[4000:7200])), 0.1)
+        base, _ = sf.read(io.BytesIO(self.client.get(
+            f"/api/compositions/{identifier}/base",
+        ).content))
+        effect_layer, _ = sf.read(io.BytesIO(self.client.get(
+            f"/api/compositions/{identifier}/effects",
+        ).content))
+        self.assertEqual(np.max(np.abs(base)), 0)
+        self.assertGreater(np.max(np.abs(effect_layer[4000:7200])), 0.1)
         response = self.client.post(
             f"/api/compositions/{identifier}/effects",
             json={"at": 1.9, "effect": "guitar", "intensity": 0.4, "volume": 0.75, "pitch": "high"},
@@ -370,17 +379,19 @@ class InterfaceTests(unittest.TestCase):
         )
 
     def test_compositions_can_be_deleted_individually_or_all_at_once(self):
-        from app import COMPOSITIONS, base_composition_path, composition_path, effects_path
+        from app import COMPOSITIONS, base_composition_path, composition_path, effects_audio_path, effects_path
         COMPOSITIONS.mkdir()
         identifiers = ["20260913T123456123456Z-42", "20260913T123457123456Z-43"]
         for identifier in identifiers:
             sf.write(composition_path(identifier), np.zeros((80, 2)), 8000, subtype="PCM_16")
             os.link(composition_path(identifier), base_composition_path(identifier))
+            os.link(composition_path(identifier), effects_audio_path(identifier))
             effects_path(identifier).write_text("[]")
 
         self.assertEqual(self.client.delete(f"/api/compositions/{identifiers[0]}").status_code, 204)
         self.assertFalse(composition_path(identifiers[0]).exists())
         self.assertFalse(base_composition_path(identifiers[0]).exists())
+        self.assertFalse(effects_audio_path(identifiers[0]).exists())
         self.assertFalse(effects_path(identifiers[0]).exists())
         self.assertEqual(self.client.delete(f"/api/compositions/{identifiers[0]}").status_code, 404)
         self.assertEqual(self.client.delete("/api/compositions").status_code, 204)

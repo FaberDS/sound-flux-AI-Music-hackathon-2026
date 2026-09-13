@@ -19,6 +19,188 @@ function wav() {
   return output
 }
 
+test('connects Chordcat and turns note taps into the chosen sound', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const listeners = new Set<(event: MIDIMessageEvent) => void>()
+    let sounds = 0
+    const input = {
+      name: 'CHORDCAT',
+      state: 'connected',
+      async open() { return input },
+      async close() { return input },
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        if (type === 'midimessage' && typeof listener === 'function')
+          listeners.add(listener as (event: MIDIMessageEvent) => void)
+      },
+      removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        if (type === 'midimessage' && typeof listener === 'function')
+          listeners.delete(listener as (event: MIDIMessageEvent) => void)
+      },
+    }
+    Object.defineProperty(navigator, 'requestMIDIAccess', {
+      configurable: true,
+      value: async () => ({ inputs: new Map([['chordcat', input]]) }),
+    })
+    Object.assign(window, {
+      playChordcatNote() {
+        const event = { data: new Uint8Array([0x90, 60, 100]) } as MIDIMessageEvent
+        listeners.forEach((listener) => listener(event))
+      },
+      chordcatSounds: () => sounds,
+    })
+    class Context {
+      state = 'running'
+      currentTime = 0
+      destination = {}
+      async resume() {}
+      createGain() {
+        return {
+          gain: {
+            value: 0,
+            setTargetAtTime() {},
+            setValueAtTime() {},
+            linearRampToValueAtTime() {},
+            exponentialRampToValueAtTime() {},
+          },
+          connect(destination: AudioNode) { return destination },
+          disconnect() {},
+        }
+      }
+      createOscillator() {
+        return {
+          type: 'sine',
+          frequency: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+          connect(destination: AudioNode) { return destination },
+          disconnect() {},
+          start() { sounds++ },
+          stop() {},
+          onended: null,
+        }
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: Context })
+  })
+  await page.route('**/api/health', (route) =>
+    route.fulfill({ json: { chat_model: 'test-model' } }),
+  )
+  await mockSavedApi(page)
+  await page.route('**/engine/api/compositions', (route) =>
+    route.fulfill({ json: [] }),
+  )
+
+  await page.goto('/')
+  const rhythm = page.getByRole('region', { name: 'FIND YOUR RHYTHM' })
+  await expect(rhythm).toBeVisible()
+  await rhythm.getByRole('button', { name: 'Connect Chordcat' }).click()
+  await expect(rhythm.getByRole('status')).toHaveText(
+    'Ready. Tap any key when you feel the music.',
+  )
+  await rhythm.getByRole('button', { name: 'Glockenspiel' }).click()
+  await page.evaluate(() =>
+    (window as unknown as { playChordcatNote: () => void }).playChordcatNote(),
+  )
+  await page.evaluate(() =>
+    (window as unknown as { playChordcatNote: () => void }).playChordcatNote(),
+  )
+  await expect(rhythm.getByRole('status')).toHaveText('Glockenspiel played.')
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { chordcatSounds: () => number }).chordcatSounds(),
+  )).toBe(2)
+  await expect(rhythm.getByRole('button', { name: 'Glockenspiel' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await page.setViewportSize({ width: 320, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320)
+  await rhythm.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(rhythm.getByRole('button', { name: 'Connect Chordcat' }))
+    .toBeVisible()
+})
+
+test('controls and refreshes audio layers independently', async ({ page }) => {
+  await page.addInitScript(() => {
+    const audio = {
+      currentTime: 0,
+      starts: [] as number[],
+      gains: [] as number[],
+      sources: [] as Array<{ loop: boolean; onended: null | (() => void) }>,
+    }
+    class Context {
+      state = 'running'
+      destination = {}
+      get currentTime() { return audio.currentTime }
+      async resume() {}
+      createGain() {
+        const index = audio.gains.push(0) - 1
+        return {
+          gain: {
+            get value() { return audio.gains[index] },
+            set value(value: number) { audio.gains[index] = value },
+            setTargetAtTime(value: number) { audio.gains[index] = value },
+          },
+          connect() {},
+        }
+      }
+      async decodeAudioData() { return { duration: 2 } as AudioBuffer }
+      createBufferSource() {
+        const source = {
+          buffer: null,
+          loop: false,
+          onended: null as null | (() => void),
+          connect() {},
+          disconnect() {},
+          start(_when = 0, offset = 0) { audio.starts.push(offset) },
+          stop() {},
+        }
+        audio.sources.push(source)
+        return source
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: Context })
+    Object.assign(window, { roomAudio: audio })
+  })
+  await page.route('**/song.wav', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: wav() }),
+  )
+  await page.goto('/')
+
+  const starts = await page.evaluate(async () => {
+    const { MusicRoom } = await import('/src/lib/music.ts')
+    let ended = 0
+    const room = new MusicRoom(() => ended++)
+    await room.playComposition('/song.wav')
+    const audio = (window as unknown as {
+      roomAudio: {
+        currentTime: number
+        starts: number[]
+        sources: Array<{ loop: boolean; onended: null | (() => void) }>
+      }
+    }).roomAudio
+    audio.currentTime = 1.25
+    await room.refreshCompositionEffects('/song.wav')
+    room.setMusicVolume(0.35)
+    room.setEffectsVolume(0.65)
+    room.setAutoReplay(false)
+    audio.sources[0].onended?.()
+    return {
+      starts: audio.starts,
+      gains: audio.gains,
+      loops: audio.sources.map((source) => source.loop),
+      ended,
+    }
+  })
+
+  expect(starts).toEqual({
+    starts: [0, 1.25],
+    gains: [0.45 * 0.45, 0.35, 0.65],
+    loops: [false, false],
+    ended: 1,
+  })
+})
+
 test('opens a saved composition in the artwork player', async ({ page }) => {
   await page.addInitScript(() => {
     class Context {
@@ -33,6 +215,7 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
       }
       async decodeAudioData() {
         return {
+          duration: 2,
           sampleRate: 8_000,
           getChannelData() {
             return new Float32Array(8_000)
@@ -53,6 +236,12 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
     route.request().method() === 'DELETE'
       ? route.fulfill({ status: 204 })
       : route.fulfill({ contentType: 'audio/wav', body: wav() }),
+  )
+  await page.route('**/engine/api/compositions/*/base', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: wav() }),
+  )
+  await page.route('**/engine/api/compositions/*/effects', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: wav() }),
   )
   await page.route('**/engine/api/compositions', (route) =>
     route.request().method() === 'DELETE'
@@ -104,20 +293,57 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: /Delete Composition/ }).last().click()
   await expect(page.locator('.song-card')).toHaveCount(1)
-  await page.getByRole('button', { name: /Play Composition/ }).click()
+  await page.getByRole('button', { name: /Play Composition/ }).first().click()
   const cameraAlert = page.getByRole('alertdialog', {
-    name: 'Add effects with your mouth?',
+    name: 'Add sounds to your music?',
   })
   await expect(cameraAlert).toBeVisible()
   await expect(cameraAlert.locator('.mouth-sound-pictogram')).toBeVisible()
+  await expect(
+    cameraAlert.getByRole('button', { name: 'Connect Chordcat' }),
+  ).toBeVisible()
   await cameraAlert.getByRole('button', { name: 'Not now' }).click()
+  const player = page.getByRole('region', { name: 'Voice companion' })
+  await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Back to home' })).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Auto replay' })).toHaveCount(0)
+  await page.setViewportSize({ width: 320, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await player.getByRole('button', { name: 'Show all' }).click()
   await expect(
     page.getByRole('heading', { name: 'Your composition is playing' }),
   ).toBeVisible()
+  const autoReplay = page.getByRole('button', { name: 'Auto replay' })
+  await expect(autoReplay).toHaveAttribute('aria-pressed', 'true')
+  await autoReplay.click()
+  await expect(autoReplay).toHaveAttribute('aria-pressed', 'false')
   await expect(
     page.getByRole('img', { name: 'Artwork for your saved composition' }),
   ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Enable camera' })).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Voice companion' })
+      .getByRole('button', { name: 'Connect Chordcat' }),
+  ).toBeVisible()
+  const layerVolumes = page.getByRole('group', { name: 'Layer volumes' })
+  await layerVolumes.getByRole('slider', { name: 'Generated music volume' })
+    .fill('0.35')
+  await layerVolumes.getByRole('slider', { name: 'Effects volume' }).fill('0.65')
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('sound-flux-layer-volumes') ?? '{}'),
+  )).toEqual({ music: 0.35, effects: 0.65 })
+  await page.reload()
+  await page.getByRole('button', { name: /Your songs/ }).click()
+  await page.getByRole('button', { name: /Play Composition/ }).first().click()
+  await cameraAlert.getByRole('button', { name: 'Not now' }).click()
+  await page.getByRole('button', { name: 'Show all' }).click()
+  await expect(
+    page.getByRole('slider', { name: 'Generated music volume' }),
+  ).toHaveValue('0.35')
+  await expect(page.getByRole('slider', { name: 'Effects volume' }))
+    .toHaveValue('0.65')
   const timeline = page.getByLabel('Composition timeline with 1 mouth effect')
   await expect(timeline).toBeVisible()
   await expect(timeline.locator('.timeline-effect')).toHaveAttribute('title', /60% volume/)
@@ -150,8 +376,10 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
     page.getByRole('region', { name: 'Voice companion' })
       .getByRole('button', { name: 'Pause music' }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Back to your songs' }).click()
-  await expect(page).toHaveURL(/\/songs$/)
+  await page.getByRole('button', { name: 'Focus mode' }).click()
+  await page.getByRole('button', { name: 'Back to home' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.getByRole('button', { name: /Your songs/ }).click()
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Delete all songs' }).click()
   await expect(page.getByRole('heading', { name: 'No songs yet' })).toBeVisible()
@@ -164,6 +392,7 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   let body = ''
   await page.addInitScript(() => {
     const state = { level: 0.05 }
+    let recorderStarts = 0
     navigator.mediaDevices.getUserMedia = async () =>
       ({ getTracks: () => [{ stop() {} }] }) as unknown as MediaStream
     class Context {
@@ -226,6 +455,7 @@ test('prepares music, then records the hum before composing', async ({ page }) =
       ondataavailable: ((event: BlobEvent) => void) | null = null
       onstop: (() => void) | null = null
       start() {
+        recorderStarts++
         this.state = 'recording'
         setTimeout(() => {
           state.level = 0
@@ -238,7 +468,10 @@ test('prepares music, then records the hum before composing', async ({ page }) =
         setTimeout(() => this.onstop?.(), 0)
       }
     }
-    Object.assign(window, { MediaRecorder: Recorder })
+    Object.assign(window, {
+      MediaRecorder: Recorder,
+      recorderStarts: () => recorderStarts,
+    })
     HTMLMediaElement.prototype.play = function () {
       setTimeout(() => this.onended?.(new Event('ended')), 0)
       return Promise.resolve()
@@ -262,10 +495,17 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   await page.route('**/engine/api/status', (route) =>
     route.fulfill({ json: { ready: true } }),
   )
+  await page.route('**/engine/api/compositions', (route) =>
+    route.fulfill({ json: [] }),
+  )
   await page.route('**/engine/api/compose', (route) => {
     uploads++
     body = route.request().postDataBuffer()!.toString('latin1')
-    return route.fulfill({ contentType: 'audio/wav', body: wav() })
+    return route.fulfill({
+      contentType: 'audio/wav',
+      headers: { 'X-Composition-ID': 'composition-1' },
+      body: wav(),
+    })
   })
   await page.goto('/')
   const firstStartedAt = Date.now()
@@ -282,9 +522,20 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   ).toHaveClass(/session-active/)
   await expect.poll(() => uploads).toBe(1)
   expect(body).toContain('name="audio"')
-  await expect(page.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  await page.getByRole('alertdialog', { name: 'Add sounds to your music?' })
+    .getByRole('button', { name: 'Not now' }).click()
+  const player = page.getByRole('region', { name: 'Voice companion' })
+  await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  await player.getByRole('button', { name: 'Show all' }).click()
+  await player.getByRole('button', { name: 'Regenerate music' }).click()
+  await expect.poll(() => uploads).toBe(2)
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { recorderStarts: () => number }).recorderStarts(),
+    ),
+  ).toBe(1)
   const repeatStartedAt = Date.now()
-  await page.getByRole('button', { name: 'Talk with Sound Flux' }).click()
+  await player.getByRole('button', { name: 'Start new song' }).click()
   await expect(page.getByRole('button', { name: 'Humming…' })).toBeVisible()
   expect(Date.now() - repeatStartedAt).toBeLessThan(1_500)
 })

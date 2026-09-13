@@ -115,11 +115,16 @@ def effects_path(identifier: str):
     return COMPOSITIONS / f"{identifier}.effects.json"
 
 
+def effects_audio_path(identifier: str):
+    return COMPOSITIONS / f"{identifier}.effects.wav"
+
+
 def delete_composition_files(identifier: str):
     for path in (
         composition_path(identifier),
         base_composition_path(identifier),
         effects_path(identifier),
+        effects_audio_path(identifier),
     ):
         path.unlink(missing_ok=True)
 
@@ -157,6 +162,7 @@ def render_composition_effects(identifier: str, effects: list[dict]):
     if not base.is_file():
         os.link(path, base)
     samples, rate = sf.read(base, dtype="float32", always_2d=True)
+    effect_samples = np.zeros_like(samples)
     for effect in effects:
         instrument = effect["effect"]
         sound_length = 0.4 if instrument == "drum" else 1.2
@@ -175,10 +181,14 @@ def render_composition_effects(identifier: str, effects: list[dict]):
         strength = (0.12 + 0.2 * effect["intensity"]) * effect["volume"]
         envelope = np.minimum(time / 0.012, 1) * np.exp(-7 * time / sound_length) * strength
         start = round(effect["at"] * rate)
-        samples[(start + np.arange(length)) % len(samples)] += (wave * envelope)[:, None]
+        effect_samples[(start + np.arange(length)) % len(samples)] += (wave * envelope)[:, None]
     temporary = path.with_suffix(".partial.wav")
-    sf.write(temporary, np.clip(samples, -0.99, 0.99), rate, format="WAV", subtype="PCM_16")
+    sf.write(temporary, np.clip(samples + effect_samples, -0.99, 0.99), rate, format="WAV", subtype="PCM_16")
     temporary.replace(path)
+    effect_audio = effects_audio_path(identifier)
+    effect_temporary = effect_audio.with_suffix(".partial.wav")
+    sf.write(effect_temporary, np.clip(effect_samples, -0.99, 0.99), rate, format="WAV", subtype="PCM_16")
+    effect_temporary.replace(effect_audio)
     metadata = effects_path(identifier)
     metadata.with_suffix(".partial.json").write_text(json.dumps(effects))
     metadata.with_suffix(".partial.json").replace(metadata)
@@ -253,6 +263,27 @@ def composition(identifier: str):
     path = composition_path(identifier)
     if not path.is_file():
         raise HTTPException(404, "Composition not found.")
+    return FileResponse(path, media_type="audio/wav", filename=path.name)
+
+
+@app.get("/api/compositions/{identifier}/base")
+def base_composition(identifier: str):
+    path = base_composition_path(identifier)
+    if not path.is_file():
+        raise HTTPException(404, "Composition not found.")
+    return FileResponse(path, media_type="audio/wav", filename=path.name)
+
+
+@app.get("/api/compositions/{identifier}/effects")
+def composition_effect_audio(identifier: str):
+    path = effects_audio_path(identifier)
+    if not path.is_file():
+        source = composition_path(identifier)
+        if not source.is_file():
+            raise HTTPException(404, "Composition not found.")
+        with composition_lock:
+            if not path.is_file():
+                render_composition_effects(identifier, composition_effects(identifier))
     return FileResponse(path, media_type="audio/wav", filename=path.name)
 
 

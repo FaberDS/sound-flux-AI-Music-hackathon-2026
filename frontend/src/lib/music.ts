@@ -16,6 +16,7 @@ export interface SavedComposition {
   id: string
   created_at: string
   url: string
+  effectsUrl: string
   duration: number
   effects: CompositionEffect[]
 }
@@ -31,6 +32,19 @@ export interface MusicSettings {
   repeat: boolean
   input_mix: number
   match_input: boolean
+}
+
+export const DEFAULT_MUSIC_SETTINGS: MusicSettings = {
+  prompt: 'Gentle, uplifting, upbeat and beautiful orchestral instrumental composition with warm piano, soft acoustic guitar and a light rhythm.',
+  seconds: 60,
+  strength: 0.8,
+  steps: 8,
+  cfg: 2,
+  seed: 145081676,
+  repeat: false,
+  negative_prompt: 'incoherence, noise, lo-fi, bad quality, atonal, bad sound, noisy, glitchy, generic, boring, exaggerated, kitsch, corporate',
+  input_mix: 0.95,
+  match_input: true,
 }
 
 export async function getMusicSettings() {
@@ -77,7 +91,8 @@ export async function getCompositions(signal: AbortSignal) {
       items.push({
         id: item.id,
         created_at: item.created_at,
-        url: `/engine/api/compositions/${encodeURIComponent(item.id)}`,
+        url: `/engine/api/compositions/${encodeURIComponent(item.id)}/base`,
+        effectsUrl: `/engine/api/compositions/${encodeURIComponent(item.id)}/effects`,
         duration: typeof item.duration === 'number' ? item.duration : 0,
         effects: Array.isArray(item.effects)
           ? item.effects.filter(isCompositionEffect)
@@ -137,11 +152,15 @@ export async function deleteCompositionEffect(
 export class MusicRoom {
   private context: AudioContext | null = null
   private gain: GainNode | null = null
+  private musicGain: GainNode | null = null
+  private effectsGain: GainNode | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private voices = new Set<AudioScheduledSourceNode>()
   private loop: AudioBufferSourceNode | null = null
+  private effectsLoop: AudioBufferSourceNode | null = null
   private loopStartedAt = 0
   private loopDuration = 0
+  private compositionRefresh = 0
   private stream: MediaStream | null = null
   private input: MediaStreamAudioSourceNode | null = null
   private analyser: AnalyserNode | null = null
@@ -149,15 +168,31 @@ export class MusicRoom {
   private captureTimer: ReturnType<typeof setInterval> | null = null
   private onCapturePhaseChange: ((phase: CapturePhase) => void) | null = null
   private request: AbortController | null = null
+  private capturedAudio: File | null = null
+  private capturedCompositionId: string | null = null
   private epoch = 0
   private volume = 0.45
+  private musicVolume = 1
+  private effectsVolume = 1
+  private autoReplay = true
   private noteIndex = 0
+  private readonly onPlaybackEnd: () => void
+
+  constructor(onPlaybackEnd: () => void = () => {}) {
+    this.onPlaybackEnd = onPlaybackEnd
+  }
 
   private async ready() {
     if (!this.context || this.context.state === 'closed') {
       this.context = new AudioContext()
       this.gain = this.context.createGain()
+      this.musicGain = this.context.createGain()
+      this.effectsGain = this.context.createGain()
       this.gain.gain.value = this.volume * 0.45
+      this.musicGain.gain.value = this.musicVolume
+      this.effectsGain.gain.value = this.effectsVolume
+      this.musicGain.connect(this.gain)
+      this.effectsGain.connect(this.gain)
       this.gain.connect(this.context.destination)
     }
     await this.context.resume()
@@ -173,16 +208,35 @@ export class MusicRoom {
       )
   }
 
+  setMusicVolume(value: number) {
+    this.musicVolume = value
+    if (this.context && this.musicGain)
+      this.musicGain.gain.setTargetAtTime(value, this.context.currentTime, 0.05)
+  }
+
+  setEffectsVolume(value: number) {
+    this.effectsVolume = value
+    if (this.context && this.effectsGain)
+      this.effectsGain.gain.setTargetAtTime(value, this.context.currentTime, 0.05)
+  }
+
+  setAutoReplay(value: boolean) {
+    this.autoReplay = value
+    if (this.loop) this.loop.loop = value
+    if (this.effectsLoop) this.effectsLoop.loop = value
+  }
+
   private note(
     midi: number,
     instrument: Instrument,
     duration = 1.5,
     strength = 0.25,
+    output = this.effectsGain!,
   ) {
     const context = this.context!
     const now = context.currentTime
     const envelope = context.createGain()
-    envelope.connect(this.gain!)
+    envelope.connect(output)
     envelope.gain.setValueAtTime(0, now)
     envelope.gain.linearRampToValueAtTime(strength, now + 0.012)
     envelope.gain.exponentialRampToValueAtTime(0.001, now + duration)
@@ -263,13 +317,20 @@ export class MusicRoom {
     const tick = () => {
       if (step % 4 === 0)
         [48, 52, 55].forEach((note) =>
-          this.note(note + (step % 8 === 4 ? 5 : 0), 'piano', 3.4, 0.08),
+          this.note(
+            note + (step % 8 === 4 ? 5 : 0),
+            'piano',
+            3.4,
+            0.08,
+            this.musicGain!,
+          ),
         )
       this.note(
         melody[step % melody.length],
         mood === 'calm' ? 'piano' : 'guitar',
         1.5,
         0.14,
+        this.musicGain!,
       )
       step++
     }
@@ -289,7 +350,39 @@ export class MusicRoom {
       onCapturePhaseChange('idle')
       return false
     }
+    this.capturedAudio = audio
+    return this.compose(audio, epoch, onCapturePhaseChange, onComposition)
+  }
 
+  canRegenerate(identifier: string | null) {
+    return Boolean(
+      identifier &&
+        this.capturedAudio &&
+        identifier === this.capturedCompositionId,
+    )
+  }
+
+  async regenerate(
+    onCapturePhaseChange: (phase: CapturePhase) => void,
+    onComposition?: (identifier: string) => void,
+  ) {
+    if (!this.capturedAudio)
+      throw new Error('Record a melody before regenerating it.')
+    this.stop()
+    return this.compose(
+      this.capturedAudio,
+      this.epoch,
+      onCapturePhaseChange,
+      onComposition,
+    )
+  }
+
+  private async compose(
+    audio: File,
+    epoch: number,
+    onCapturePhaseChange: (phase: CapturePhase) => void,
+    onComposition?: (identifier: string) => void,
+  ) {
     const controller = new AbortController()
     this.request = controller
     onCapturePhaseChange('composing')
@@ -318,7 +411,10 @@ export class MusicRoom {
       if (epoch !== this.epoch) return false
       this.startLoop(buffer)
       const identifier = response.headers.get('X-Composition-ID')
-      if (identifier) onComposition?.(identifier)
+      if (identifier) {
+        this.capturedCompositionId = identifier
+        onComposition?.(identifier)
+      }
       onCapturePhaseChange('idle')
       return true
     } catch (error) {
@@ -330,26 +426,72 @@ export class MusicRoom {
     }
   }
 
-  async playComposition(url: string) {
+  async playComposition(url: string, effectsUrl?: string) {
     this.stop()
     const epoch = this.epoch
     await this.ready()
-    const response = await fetch(url)
-    if (!response.ok) throw new Error('The saved composition could not be played.')
-    const buffer = await this.context!.decodeAudioData(await response.arrayBuffer())
+    const [response, effectsResponse] = await Promise.all([
+      fetch(url),
+      effectsUrl ? fetch(effectsUrl) : null,
+    ])
+    if (!response.ok || (effectsResponse && !effectsResponse.ok))
+      throw new Error('The saved composition could not be played.')
+    const [buffer, effectsBuffer] = await Promise.all([
+      this.context!.decodeAudioData(await response.arrayBuffer()),
+      effectsResponse
+        ? this.context!.decodeAudioData(await effectsResponse.arrayBuffer())
+        : null,
+    ])
     if (epoch !== this.epoch) return false
     this.startLoop(buffer)
+    if (effectsBuffer) this.startEffectsLoop(effectsBuffer)
     return true
   }
 
-  private startLoop(buffer: AudioBuffer) {
-    this.loop = this.context!.createBufferSource()
-    this.loop.buffer = buffer
-    this.loop.loop = true
-    this.loop.connect(this.gain!)
-    this.loopStartedAt = this.context!.currentTime
+  async refreshCompositionEffects(url: string) {
+    if (!this.context || !this.loop || !this.loopDuration) return false
+    const epoch = this.epoch
+    const refresh = ++this.compositionRefresh
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok) throw new Error('The updated effects could not be played.')
+    const buffer = await this.context.decodeAudioData(await response.arrayBuffer())
+    if (epoch !== this.epoch || refresh !== this.compositionRefresh || !this.loop)
+      return false
+    const offset =
+      (this.context.currentTime - this.loopStartedAt) % buffer.duration
+    this.effectsLoop?.stop()
+    this.effectsLoop?.disconnect()
+    this.startEffectsLoop(buffer, offset)
+    return true
+  }
+
+  private startLoop(buffer: AudioBuffer, offset = 0) {
+    const source = this.context!.createBufferSource()
+    this.loop = source
+    source.buffer = buffer
+    source.loop = this.autoReplay
+    source.connect(this.musicGain!)
+    this.loopStartedAt = this.context!.currentTime - offset
     this.loopDuration = buffer.duration
-    this.loop.start()
+    source.onended = () => {
+      if (this.loop !== source) return
+      source.disconnect()
+      this.loop = null
+      this.effectsLoop?.stop()
+      this.effectsLoop?.disconnect()
+      this.effectsLoop = null
+      this.loopDuration = 0
+      this.onPlaybackEnd()
+    }
+    source.start(0, offset)
+  }
+
+  private startEffectsLoop(buffer: AudioBuffer, offset = 0) {
+    this.effectsLoop = this.context!.createBufferSource()
+    this.effectsLoop.buffer = buffer
+    this.effectsLoop.loop = this.autoReplay
+    this.effectsLoop.connect(this.effectsGain!)
+    this.effectsLoop.start(0, offset)
   }
 
   finishCapture() {
@@ -516,6 +658,7 @@ export class MusicRoom {
 
   stop() {
     this.epoch++
+    this.compositionRefresh++
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.request?.abort()
@@ -529,6 +672,11 @@ export class MusicRoom {
       this.loop.stop()
       this.loop.disconnect()
       this.loop = null
+    }
+    if (this.effectsLoop) {
+      this.effectsLoop.stop()
+      this.effectsLoop.disconnect()
+      this.effectsLoop = null
     }
     this.loopDuration = 0
     this.voices.forEach((voice) => {

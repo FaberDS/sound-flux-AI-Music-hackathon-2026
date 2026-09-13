@@ -375,6 +375,9 @@
   .companion-card > .composition-controls {
     order: 3;
   }
+  .companion-card > .focus-controls {
+    order: 3;
+  }
   .companion-card > .mouth-beatbox {
     order: 5;
   }
@@ -455,6 +458,21 @@
     align-items: end;
     padding: 10px;
   }
+  .composition-mode.session-active.focus-mode {
+    align-content: center;
+    grid-template-columns: minmax(0, min(94vw, 1200px));
+    gap: 24px;
+    padding: 24px 3vw;
+  }
+  .composition-mode.session-active.focus-mode > .amazing-grace-art,
+  .composition-mode.session-active.focus-mode > .focus-controls {
+    width: min(94vw, 1200px);
+  }
+  .composition-mode.session-active.focus-mode > .amazing-grace-art img {
+    width: min(100%, 1100px);
+    height: auto;
+    max-height: 68dvh;
+  }
   .session-active > :first-child,
   .session-active .record-art,
   .session-active .amazing-grace-art,
@@ -506,6 +524,12 @@
   .camera-permission.online {
     border-color: var(--color-green-strong);
     background: #f2f5ec;
+  }
+  .chordcat-permission .camera-copy > span {
+    max-width: min(340px, 48vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .camera-copy {
     display: grid;
@@ -723,6 +747,67 @@
     border-radius: 8px;
     color: var(--color-brown);
     font-weight: 700;
+  }
+  .focus-controls {
+    display: grid;
+    grid-template-areas: 'back play show';
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 16px;
+  }
+  .focus-controls > button:not(.music-button) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 12px 20px;
+    border: 2px solid var(--color-control-line);
+    border-radius: 8px;
+    color: var(--color-brown);
+    font-weight: 700;
+  }
+  .focus-back {
+    grid-area: back;
+    justify-self: start;
+  }
+  .focus-play {
+    grid-area: play;
+  }
+  .focus-show-all {
+    grid-area: show;
+    justify-self: end;
+  }
+  .layer-volume-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 10px 24px;
+    flex-basis: 100%;
+    width: min(680px, 100%);
+    margin: 0;
+    padding: 12px 18px;
+    border: 2px solid var(--color-control-line);
+    border-radius: 8px;
+    color: var(--color-brown);
+  }
+  .layer-volume-controls legend {
+    padding-inline: 6px;
+    font-weight: 700;
+  }
+  .layer-volume-controls label {
+    display: grid;
+    gap: 2px;
+  }
+  .layer-volume-controls label > span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-weight: 700;
+  }
+  .layer-volume-controls input {
+    width: 100%;
+    min-height: 44px;
+    accent-color: var(--color-orange-strong);
+    cursor: pointer;
   }
   .mouth-beatbox {
     display: grid;
@@ -992,6 +1077,95 @@
     margin-top: 0;
     padding: 64px 0;
     scroll-margin-top: 0;
+  }
+  .rhythm-section {
+    padding: 64px 0 24px;
+  }
+  .rhythm-card {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(380px, 1.2fr);
+    gap: 48px;
+    align-items: center;
+    width: min(1050px, 100%);
+    margin-inline: auto;
+    padding: 42px;
+    border: 2px solid var(--color-control-line);
+    border-radius: 14px;
+    background: #fffefa;
+    box-shadow: 0 12px 32px #70432f12;
+  }
+  .rhythm-intro p {
+    margin: 0 0 5px;
+    color: #b94a00;
+    font-weight: 700;
+  }
+  .rhythm-intro h2 {
+    margin: 0;
+    color: var(--color-brown);
+    font: 700 clamp(2.75rem, 5vw, 4rem)/0.95 var(--font-display);
+  }
+  .rhythm-intro span {
+    display: block;
+    margin-top: 17px;
+    color: var(--color-muted);
+    font-size: 20px;
+  }
+  .rhythm-controls {
+    display: grid;
+    gap: 16px;
+  }
+  .rhythm-connect {
+    width: 100%;
+  }
+  .rhythm-sounds {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .rhythm-sounds legend {
+    grid-column: 1 / -1;
+    margin-bottom: 4px;
+    color: var(--color-brown);
+    font-weight: 700;
+  }
+  .rhythm-sounds button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 58px;
+    padding: 12px 14px;
+    border: 2px solid var(--color-line);
+    border-radius: 8px;
+    color: var(--color-brown);
+    background: white;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .rhythm-sounds button[aria-pressed='true'] {
+    border-color: var(--color-brown);
+    background: var(--color-yellow);
+  }
+  .rhythm-sounds button svg:last-child {
+    margin-left: auto;
+  }
+  .rhythm-disconnect {
+    justify-self: start;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--color-muted);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .rhythm-status {
+    min-height: 1.5em;
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 17px;
   }
   .instruments-section .section-heading,
   .instruments-section .instrument-grid {
@@ -1643,11 +1817,13 @@
   }
   .camera-alert-actions {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: center;
     gap: 14px;
   }
   .camera-alert-actions > button:last-child {
+    grid-column: 1 / -1;
+    justify-self: center;
     min-height: 60px;
     padding: 12px 18px;
     color: var(--color-brown);
@@ -1874,6 +2050,14 @@
     min-height: 0;
     padding: 48px 0;
   }
+  .rhythm-section {
+    padding: 48px 0 0;
+  }
+  .rhythm-card {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 30px 24px;
+  }
   .session-toolbar {
     flex-wrap: wrap;
     gap: 8px;
@@ -1915,6 +2099,12 @@
   .site-header {
     margin-left: 22px;
     margin-right: 22px;
+  }
+  .camera-alert-actions {
+    grid-template-columns: 1fr;
+  }
+  .camera-alert-actions > button:last-child {
+    grid-column: auto;
   }
   .main-content {
     padding: 31px 22px 0;
@@ -1964,6 +2154,17 @@
   .music-button {
     width: 100%;
     justify-content: center;
+  }
+  .focus-controls {
+    grid-template-areas:
+      'play play'
+      'back show';
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .focus-controls > button:not(.music-button) {
+    width: 100%;
+    justify-content: center;
+    padding-inline: 10px;
   }
   .timeline-scale {
     display: none;
@@ -2030,6 +2231,9 @@
   .companion-message > p:not(.transcript) {
     font-size: 18px;
   }
+  .layer-volume-controls {
+    grid-template-columns: 1fr;
+  }
   .microphone-button {
     min-height: 66px;
     font-size: 20px;
@@ -2049,6 +2253,15 @@
   .instrument-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+  .rhythm-card {
+    padding: 26px 20px;
+  }
+  .rhythm-intro h2 {
+    font-size: 44px;
+  }
+  .rhythm-sounds {
+    grid-template-columns: 1fr;
   }
   .instrument-card {
     padding: 20px;

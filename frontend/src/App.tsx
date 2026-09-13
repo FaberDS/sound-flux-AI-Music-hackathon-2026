@@ -10,6 +10,7 @@ import {
   ArrowRight,
   AudioLines,
   BellRing,
+  Cable,
   Camera,
   CameraOff,
   Check,
@@ -34,6 +35,7 @@ import {
 } from 'lucide-react'
 import { checkConnection, preseedOnboarding } from './lib/api'
 import {
+  DEFAULT_MUSIC_SETTINGS,
   deleteAllCompositions,
   deleteComposition,
   deleteCompositionEffect,
@@ -51,10 +53,12 @@ import {
 } from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
 import SoundFlux from './components/sound-flux/SoundFlux.jsx'
+import { ChordcatRhythm } from './components/ChordcatRhythm'
 import { MouthBeatbox } from './components/MouthBeatbox'
 import { ProfilePanel } from './components/ProfilePanel'
 import { SavedHistory } from './components/SavedHistory'
 import { useSavedData } from './hooks/useSavedData'
+import { useChordcatRhythm } from './hooks/useChordcatRhythm'
 import {
   historyTime,
   mergeTurns,
@@ -106,6 +110,25 @@ const amazingGraceImages = [
   amazingGraceSundown,
   amazingGraceWedding,
 ]
+const layerVolumeKey = 'sound-flux-layer-volumes'
+
+function savedLayerVolumes() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(layerVolumeKey) ?? '{}')
+    return {
+      music:
+        typeof saved.music === 'number' && saved.music >= 0 && saved.music <= 1
+          ? saved.music
+          : 1,
+      effects:
+        typeof saved.effects === 'number' && saved.effects >= 0 && saved.effects <= 1
+          ? saved.effects
+          : 1,
+    }
+  } catch {
+    return { music: 1, effects: 1 }
+  }
+}
 
 function compositionArtwork(identifier: string) {
   const seed = Array.from(identifier).reduce(
@@ -295,10 +318,13 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
+  const [focusMode, setFocusMode] = useState(true)
+  const [autoReplay, setAutoReplay] = useState(true)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
   const [cameraEnabled, setCameraEnabled] = useState(false)
   const [cameraPromptOpen, setCameraPromptOpen] = useState(false)
   const [volume, setVolume] = useState(0.45)
+  const [layerVolumes, setLayerVolumes] = useState(savedLayerVolumes)
   const [readAloud, setReadAloud] = useState(true)
   const [dialog, setDialog] = useState<'help' | 'profile' | null>(null)
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
@@ -306,7 +332,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     'checking' | 'online' | 'offline'
   >('checking')
   const [musicError, setMusicError] = useState('')
-  const [musicSettings, setMusicSettings] = useState<MusicSettings | null>(null)
+  const [musicSettings, setMusicSettings] = useState<MusicSettings>(DEFAULT_MUSIC_SETTINGS)
   const [musicSettingsStatus, setMusicSettingsStatus] = useState('Loading music settings…')
   const [seeding, setSeeding] = useState(false)
   const [amazingGraceImage] = useState(
@@ -321,7 +347,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   const [musicRequest, setMusicRequest] = useState(0)
   const [styleReady, setStyleReady] = useState(false)
-  const [music] = useState(() => new MusicRoom())
+  const [music] = useState(() => new MusicRoom(() => setPlaying(false)))
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const musicSettingsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const musicSettingsVersion = useRef(0)
@@ -345,6 +371,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     beginMusicPreparation,
   )
   const compositionMode = activeCompositionId !== null
+  const focusedComposition = compositionMode && focusMode
   const activeComposition = compositions.find(
     (composition) => composition.id === activeCompositionId,
   )
@@ -438,6 +465,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
   useEffect(() => {
     music.setVolume(volume)
   }, [music, volume])
+  useEffect(() => {
+    music.setMusicVolume(layerVolumes.music)
+    music.setEffectsVolume(layerVolumes.effects)
+  }, [layerVolumes, music])
   useEffect(
     () => () => {
       music.dispose()
@@ -458,6 +489,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setStyleReady(true)
       setCapturePhase('recording')
       void music.captureAndCompose(setCapturePhase, (identifier) => {
+        setFocusMode(true)
         setActiveCompositionId(identifier)
         void refreshCompositions()
       }).then(
@@ -518,10 +550,25 @@ export default function App({ debug = false }: { debug?: boolean }) {
           ),
         )
         setMusicError('')
+        if (playing && activeComposition)
+          void music.refreshCompositionEffects(activeComposition.effectsUrl).catch(() =>
+            setMusicError(
+              'The sound was saved. Pause and play the song to hear it.',
+            ),
+          )
       },
       () => setMusicError('The effect played, but could not be saved.'),
     )
-  }, [activeCompositionId, music])
+  }, [activeComposition, activeCompositionId, music, playing])
+  const playRhythm = useCallback((effect: Instrument, pitch: EffectPitch) => {
+    if (compositionMode && playing) beat(effect, 0.8, 1, pitch)
+    else void playInstrument(effect)
+  }, [beat, compositionMode, playInstrument, playing])
+  const chordcat = useChordcatRhythm({
+    effects: instruments,
+    savesToSong: compositionMode && playing,
+    onPlay: playRhythm,
+  })
   const removeEffect = useCallback((effectId: string) => {
     if (!activeCompositionId) return
     void deleteCompositionEffect(activeCompositionId, effectId).then(
@@ -533,10 +580,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
         )
         setMusicError('')
         if (playing && activeComposition)
-          void music.playComposition(activeComposition.url).catch(() => {
-            setPlaying(false)
-            setMusicError('The updated composition could not be played.')
-          })
+          void music.refreshCompositionEffects(activeComposition.effectsUrl).catch(() =>
+            setMusicError('Pause and play the song to update its effects.'),
+          )
       },
       () => setMusicError('The effect could not be removed.'),
     )
@@ -546,6 +592,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     setCameraEnabled(false)
     setCapturePhase('idle')
     setPlaying(false)
+    setFocusMode(true)
     setActiveCompositionId(null)
     companion.stop()
   }
@@ -590,7 +637,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setPlaying(
         Boolean(
           composition
-            ? await music.playComposition(composition.url)
+            ? await music.playComposition(
+                composition.url,
+                composition.effects.length ? composition.effectsUrl : undefined,
+              )
             : await music.start(mood),
         ),
       )
@@ -601,14 +651,41 @@ export default function App({ debug = false }: { debug?: boolean }) {
       )
     }
   }
+  async function regenerateMusic() {
+    if (
+      capturePhase !== 'idle' ||
+      !music.canRegenerate(activeCompositionId)
+    )
+      return
+    setPlaying(false)
+    setMusicError('')
+    try {
+      setPlaying(
+        await music.regenerate(setCapturePhase, (identifier) => {
+          setActiveCompositionId(identifier)
+          void refreshCompositions()
+        }),
+      )
+    } catch (error) {
+      setMusicError(
+        error instanceof Error
+          ? error.message
+          : 'The audio engine could not regenerate the music.',
+      )
+    }
+  }
   async function playSavedComposition(composition: SavedComposition) {
     music.stop()
     setPlaying(false)
     void companion.stop()
+    setFocusMode(true)
     setActiveCompositionId(composition.id)
     navigatePage('home')
     try {
-      setPlaying(Boolean(await music.playComposition(composition.url)))
+      setPlaying(Boolean(await music.playComposition(
+        composition.url,
+        composition.effects.length ? composition.effectsUrl : undefined,
+      )))
       setMusicError('')
     } catch {
       setActiveCompositionId(null)
@@ -715,12 +792,26 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
 
+  function updateLayerVolume(layer: 'music' | 'effects', value: number) {
+    setLayerVolumes((current) => {
+      const next = { ...current, [layer]: value }
+      try {
+        localStorage.setItem(layerVolumeKey, JSON.stringify(next))
+      } catch {
+        /* The controls still work when browser storage is unavailable. */
+      }
+      return next
+    })
+  }
+
   function updateMusicSetting<Key extends keyof MusicSettings>(
     key: Key,
     value: MusicSettings[Key],
   ) {
-    if (!musicSettings) return
-    const next = { ...musicSettings, [key]: value }
+    saveDebugMusicSettings({ ...musicSettings, [key]: value })
+  }
+
+  function saveDebugMusicSettings(next: MusicSettings) {
     const version = ++musicSettingsVersion.current
     setMusicSettings(next)
     setMusicSettingsStatus('Saving…')
@@ -772,8 +863,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
         <section>
           <h2>Composition defaults</h2>
           <p>Changes save automatically and apply to the next composition.</p>
-          {musicSettings && (
-            <form className="debug-music-settings" onSubmit={(event) => event.preventDefault()}>
+          <form className="debug-music-settings" onSubmit={(event) => event.preventDefault()}>
               <label className="wide">
                 <span>Music description</span>
                 <textarea
@@ -867,7 +957,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   min="-1"
                   max="2147483647"
                   step="1"
-                  defaultValue={musicSettings.seed}
+                  value={musicSettings.seed}
                   onChange={(event) => {
                     const value = event.currentTarget.valueAsNumber
                     if (Number.isInteger(value) && value >= -1 && value <= 2_147_483_647)
@@ -896,8 +986,14 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 />
                 <span>Repeat a short hum to fill a longer composition</span>
               </label>
+              <button
+                type="button"
+                className="wide"
+                onClick={() => saveDebugMusicSettings(DEFAULT_MUSIC_SETTINGS)}
+              >
+                Reset to defaults
+              </button>
             </form>
-          )}
           <p className="debug-settings-status" role="status">{musicSettingsStatus}</p>
         </section>
         <section>
@@ -1084,11 +1180,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
           </div>
           <section
             ref={companionRef}
-            className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''}`}
+            className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''} ${focusedComposition ? 'focus-mode' : ''}`}
             aria-label="Voice companion"
             tabIndex={-1}
           >
-            <div className="connection-row">
+            {!focusedComposition && <div className="connection-row">
               <button
                 className={`connection-status ${connection}`}
                 onClick={() => void refreshConnection()}
@@ -1117,7 +1213,36 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   </span>
                 </button>
               )}
-            </div>
+              {compositionMode && (
+                <button
+                  type="button"
+                  className={`camera-permission chordcat-permission ${chordcat.connected ? 'online' : ''}`}
+                  aria-pressed={chordcat.connected}
+                  aria-label={chordcat.connected ? 'Disconnect Chordcat' : 'Connect Chordcat'}
+                  onClick={() => {
+                    if (chordcat.connected) chordcat.disconnect()
+                    else void chordcat.connect()
+                  }}
+                  disabled={chordcat.connecting}
+                >
+                  {chordcat.connected
+                    ? <Check size={22} />
+                    : <Cable size={22} />}
+                  <span className="camera-copy">
+                    <strong>{chordcat.connected ? 'Chordcat ready' : 'Chordcat'}</strong>
+                    <span>
+                      {chordcat.connecting
+                        ? 'Connecting…'
+                        : chordcat.connected
+                          ? chordcat.status
+                          : chordcat.status === 'Connect your Chordcat to begin.'
+                            ? 'Connect music board'
+                            : chordcat.status}
+                    </span>
+                  </span>
+                </button>
+              )}
+            </div>}
             {preparingMusicStyle ? (
               <div className="record-art music-preparation" role="status">
                 <SoundFlux state="thinking" size={180} showBrand={false} showStatus={false} />
@@ -1162,7 +1287,24 @@ export default function App({ debug = false }: { debug?: boolean }) {
             ) : (
               <RecordArtwork active={playing} />
             )}
-            <div
+            {focusedComposition && (
+              <div className="focus-controls" aria-label="Focus mode controls">
+                <button className="focus-back" onClick={() => {
+                  stopAll()
+                  navigatePage('home')
+                }}>
+                  <ArrowLeft size={20} /> Back to home
+                </button>
+                <button className="music-button focus-play" onClick={() => void toggleMusic()}>
+                  {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                  {playing ? 'Pause music' : 'Play music'}
+                </button>
+                <button className="focus-show-all" onClick={() => setFocusMode(false)}>
+                  Show all
+                </button>
+              </div>
+            )}
+            {!focusedComposition && <div
               className="companion-message"
               aria-live="polite"
               aria-atomic="true"
@@ -1173,7 +1315,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
               )}
               <h2 className={companion.answer && !compositionMode ? 'answer-text' : ''}>
                 {compositionMode
-                  ? 'Your composition is playing'
+                  ? `Your composition is ${playing ? 'playing' : 'paused'}`
                   : companion.answer ||
                     (companion.phase === 'idle'
                       ? welcomeText(saved.profile)
@@ -1188,18 +1330,85 @@ export default function App({ debug = false }: { debug?: boolean }) {
                       : 'You can tap stop at any time.'}
                 </p>
               )}
-            </div>
-            {compositionMode && (
+            </div>}
+            {compositionMode && !focusedComposition && (
               <>
                 <div className="composition-controls">
                   <button className="music-button" onClick={() => void toggleMusic()}>
                     {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                     {playing ? 'Pause music' : 'Play music'}
                   </button>
+                  <button onClick={() => setFocusMode(true)}>Focus mode</button>
+                  <button
+                    className="read-aloud"
+                    aria-pressed={autoReplay}
+                    onClick={() => {
+                      const next = !autoReplay
+                      setAutoReplay(next)
+                      music.setAutoReplay(next)
+                    }}
+                  >
+                    <span className={`toggle-track ${autoReplay ? 'on' : ''}`}>
+                      <span />
+                    </span>
+                    Auto replay
+                  </button>
+                  {music.canRegenerate(activeCompositionId) && (
+                    <button
+                      onClick={() => void regenerateMusic()}
+                      disabled={capturePhase !== 'idle'}
+                    >
+                      {capturePhase === 'composing'
+                        ? 'Regenerating…'
+                        : 'Regenerate music'}
+                    </button>
+                  )}
+                  <button onClick={() => {
+                    setActiveCompositionId(null)
+                    setCameraEnabled(false)
+                    onMicrophone()
+                  }}>Start new song</button>
                   <button onClick={() => {
                     stopAll()
                     navigatePage('songs')
                   }}>Back to your songs</button>
+                  <fieldset className="layer-volume-controls">
+                    <legend>Layer volumes</legend>
+                    <label>
+                      <span>
+                        Generated music
+                        <output>{Math.round(layerVolumes.music * 100)}%</output>
+                      </span>
+                      <input
+                        aria-label="Generated music volume"
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={layerVolumes.music}
+                        onChange={(event) =>
+                          updateLayerVolume('music', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Effects
+                        <output>{Math.round(layerVolumes.effects * 100)}%</output>
+                      </span>
+                      <input
+                        aria-label="Effects volume"
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={layerVolumes.effects}
+                        onChange={(event) =>
+                          updateLayerVolume('effects', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  </fieldset>
                 </div>
                 <CompositionTimeline
                   composition={activeComposition}
@@ -1292,6 +1501,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
               )}
           </section>
         </section>
+        <ChordcatRhythm
+          effects={instruments}
+          chordcat={chordcat}
+        />
         <section
           id="instrumente"
           className="instruments-section"
@@ -1375,7 +1588,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
       <Dialog
         open={cameraPromptOpen}
         onClose={() => setCameraPromptOpen(false)}
-        title="Add effects with your mouth?"
+        title="Add sounds to your music?"
         alert
       >
         <div className="camera-alert-copy">
@@ -1408,8 +1621,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
             </svg>
           </span>
           <p>
-            Allow camera access to add sounds by opening your mouth. Video is
-            processed on this Mac and is never recorded.
+            Use the camera for mouth sounds or connect your Chordcat music
+            board. Camera video is processed on this Mac and never recorded.
           </p>
         </div>
         <div className="camera-alert-actions">
@@ -1422,6 +1635,17 @@ export default function App({ debug = false }: { debug?: boolean }) {
             }}
           >
             <Camera size={20} /> Enable camera
+          </button>
+          <button
+            type="button"
+            className="dialog-primary"
+            onClick={() => {
+              setCameraPromptOpen(false)
+              if (!chordcat.connected) void chordcat.connect()
+            }}
+          >
+            {chordcat.connected ? <Check size={20} /> : <Cable size={20} />}
+            {chordcat.connected ? 'Use Chordcat' : 'Connect Chordcat'}
           </button>
           <button type="button" onClick={() => setCameraPromptOpen(false)}>
             Not now

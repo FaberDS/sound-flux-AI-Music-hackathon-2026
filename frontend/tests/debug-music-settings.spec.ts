@@ -41,4 +41,18 @@ test('debug music controls autosave composition defaults', async ({ page }) => {
 
   await page.reload()
   await expect(strength).toHaveValue('0.75')
+
+  await page.getByRole('button', { name: 'Reset to defaults' }).click()
+  await expect(strength).toHaveValue('0.8')
+  await expect(page.getByRole('spinbutton', { name: 'Seed' })).toHaveValue('145081676')
+  await expect(page.locator('.debug-settings-status')).toHaveText('Saved for the next composition.')
+  expect(saves).toBe(2)
+  expect(settings).toMatchObject({
+    strength: 0.8,
+    steps: 8,
+    seed: 145081676,
+    repeat: false,
+    input_mix: 0.95,
+    match_input: true,
+  })
 })
