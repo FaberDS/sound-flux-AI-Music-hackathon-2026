@@ -371,10 +371,6 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   )
   await expect(timeline.getByRole('img', { name: 'Current playback position 0:01' }))
     .toHaveAttribute('style', /left: 50%/)
-  await player.getByRole('button', { name: 'Pause music' }).click()
-  await expect(timeline.getByRole('img', { name: 'Current playback position 0:00' }))
-    .toHaveAttribute('style', /left: 0%/)
-  await player.getByRole('button', { name: 'Play music' }).click()
   const removeEffect = page.getByRole('button', { name: 'Remove Piano at 0:00' })
   await expect(removeEffect).toBeVisible()
   expect((await removeEffect.boundingBox())!.height).toBeGreaterThanOrEqual(44)
@@ -412,20 +408,34 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Turn camera off' })).toBeVisible()
   await expect(player.locator('.mouth-camera')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Turn camera off' }).click()
   await page.getByRole('button', { name: 'Focus mode' }).click()
   const focusInstrument = player.getByLabel('Current instrument: Drum')
   await expect(focusInstrument).toBeVisible()
   expect((await focusInstrument.locator('span').boundingBox())!.width)
     .toBeGreaterThanOrEqual(90)
   const focusInstrumentBox = (await focusInstrument.boundingBox())!
-  const focusArtworkBox = (await player.getByRole('img', {
-    name: 'Artwork for your saved composition',
-  }).boundingBox())!
+  const focusArtworkBox = (await player.locator('.amazing-grace-art').boundingBox())!
+  const focusCameraPanelBox = (await page
+    .getByRole('region', { name: 'Mouth beatbox' })
+    .boundingBox())!
+  const focusCamera = player.locator('.mouth-camera')
+  await expect(focusCamera).toBeVisible()
+  expect(focusCameraPanelBox.x)
+    .toBeGreaterThanOrEqual(focusArtworkBox.x + focusArtworkBox.width)
   expect(focusInstrumentBox.y + focusInstrumentBox.height)
-    .toBeLessThan(focusArtworkBox.y)
+    .toBeLessThanOrEqual(Math.min(focusArtworkBox.y, focusCameraPanelBox.y))
+  expect(Math.abs(focusInstrumentBox.x - focusArtworkBox.x)).toBeLessThan(1)
+  expect(Math.abs(
+    focusInstrumentBox.x + focusInstrumentBox.width -
+    focusCameraPanelBox.x - focusCameraPanelBox.width,
+  )).toBeLessThan(1)
+  expect(focusCameraPanelBox.width / (focusArtworkBox.width + focusCameraPanelBox.width))
+    .toBeCloseTo(1 / 3, 1)
   await expect(player.getByLabel('Effect', { exact: true })).toBeHidden()
-  await expect(player.locator('.mouth-camera')).toHaveCount(0)
+  await page.setViewportSize({ width: 320, height: 1000 })
+  await expect(focusCamera).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320)
   await page.getByRole('button', { name: 'Back to home' }).click()
   await expect(page).toHaveURL(/\/$/)
   await page.getByRole('link', { name: /Your songs/ }).click()

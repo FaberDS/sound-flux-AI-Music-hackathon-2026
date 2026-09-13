@@ -217,10 +217,7 @@ export function MouthBeatbox({
   const EffectIcon = selectedEffect.icon
 
   return (
-    <section
-      className={`mouth-beatbox ${focused ? 'mouth-beatbox-focus' : ''}`}
-      aria-label="Mouth beatbox"
-    >
+    <>
       {focused && (
         <div
           className="mouth-focus-instrument"
@@ -230,76 +227,80 @@ export function MouthBeatbox({
           <span className="mouth-focus-instrument-icon">
             <EffectIcon size={48} strokeWidth={1.6} aria-hidden="true" />
           </span>
-          <strong>{selectedEffect.name}</strong>
           <small>Lift left for previous · right for next</small>
         </div>
       )}
-      <div className="mouth-camera-row">
-        {enabled && active && (
-          <video ref={video} className="mouth-camera" muted playsInline />
-        )}
-        <div>
-          <strong>Mouth beatbox</strong>
-          <p aria-live="polite">{displayStatus}</p>
+      <section
+        className={`mouth-beatbox ${focused ? 'mouth-beatbox-focus' : ''}`}
+        aria-label="Mouth beatbox"
+      >
+        <div className="mouth-camera-row">
+          {enabled && active && (
+            <video ref={video} className="mouth-camera" muted playsInline />
+          )}
+          <div>
+            <strong>Mouth beatbox</strong>
+            <p aria-live="polite">{displayStatus}</p>
+          </div>
         </div>
-      </div>
-      <div className="mouth-effect-settings">
-        <div className="effect-picker">
-          <label htmlFor="mouth-effect">Effect</label>
-          <span className="effect-dropdown">
-            <EffectIcon size={34} strokeWidth={1.6} aria-hidden="true" />
-            <select
-              id="mouth-effect"
-              value={effect}
-              onChange={(event) => setEffect(event.target.value as Instrument)}
-            >
-              {effects.map((option) => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
-            </select>
-          </span>
+        <div className="mouth-effect-settings">
+          <div className="effect-picker">
+            <label htmlFor="mouth-effect">Effect</label>
+            <span className="effect-dropdown">
+              <EffectIcon size={34} strokeWidth={1.6} aria-hidden="true" />
+              <select
+                id="mouth-effect"
+                value={effect}
+                onChange={(event) => setEffect(event.target.value as Instrument)}
+              >
+                {effects.map((option) => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+            </span>
+          </div>
+          <div className="effect-levels">
+            <label className="effect-intensity">
+              <span>Intensity <output>{Math.round(intensity * 100)}%</output></span>
+              <input
+                aria-label="Intensity"
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.1"
+                value={intensity}
+                onChange={(event) => setIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="effect-volume">
+              <span>Volume <output>{Math.round(volume * 100)}%</output></span>
+              <input
+                aria-label="Effect volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={volume}
+                onChange={(event) => setVolume(Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <fieldset className="effect-pitch">
+            <legend>Pitch</legend>
+            {(['low', 'high'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={pitch === value}
+                onClick={() => setPitch(value)}
+              >
+                {value === 'low' ? 'Low' : 'High'}
+                {pitch === value && <Check size={19} aria-hidden="true" />}
+              </button>
+            ))}
+          </fieldset>
         </div>
-        <div className="effect-levels">
-          <label className="effect-intensity">
-            <span>Intensity <output>{Math.round(intensity * 100)}%</output></span>
-            <input
-              aria-label="Intensity"
-              type="range"
-              min="0.1"
-              max="1"
-              step="0.1"
-              value={intensity}
-              onChange={(event) => setIntensity(Number(event.target.value))}
-            />
-          </label>
-          <label className="effect-volume">
-            <span>Volume <output>{Math.round(volume * 100)}%</output></span>
-            <input
-              aria-label="Effect volume"
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={volume}
-              onChange={(event) => setVolume(Number(event.target.value))}
-            />
-          </label>
-        </div>
-        <fieldset className="effect-pitch">
-          <legend>Pitch</legend>
-          {(['low', 'high'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={pitch === value}
-              onClick={() => setPitch(value)}
-            >
-              {value === 'low' ? 'Low' : 'High'}
-              {pitch === value && <Check size={19} aria-hidden="true" />}
-            </button>
-          ))}
-        </fieldset>
-      </div>
-    </section>
+      </section>
+    </>
   )
 }
