@@ -14,6 +14,8 @@ test('debug music controls autosave composition defaults', async ({ page }) => {
     repeat: true,
     input_mix: 0.15,
     match_input: false,
+    use_default: false,
+    default_file: 'default_sound.wav',
   }
   await mockSavedApi(page)
   await page.route('**/api/health', (route) =>
@@ -21,6 +23,9 @@ test('debug music controls autosave composition defaults', async ({ page }) => {
   )
   await page.route('**/engine/api/compositions', (route) =>
     route.fulfill({ json: [] }),
+  )
+  await page.route('**/engine/api/assets', (route) =>
+    route.fulfill({ json: ['default_sound.wav', 'perfect.wav'] }),
   )
   await page.route('**/engine/api/settings', (route) => {
     if (route.request().method() === 'POST') {
@@ -42,11 +47,21 @@ test('debug music controls autosave composition defaults', async ({ page }) => {
   await page.reload()
   await expect(strength).toHaveValue('0.75')
 
+  const useDefault = page.getByRole('checkbox', { name: 'Use default audio instead of generating' })
+  const defaultFile = page.getByRole('combobox', { name: 'Default audio file' })
+  await expect(defaultFile).toBeDisabled()
+  await useDefault.check()
+  await expect(defaultFile).toBeEnabled()
+  await expect.poll(() => saves).toBe(2)
+  await defaultFile.selectOption('perfect.wav')
+  await expect.poll(() => saves).toBe(3)
+  expect(settings).toMatchObject({ use_default: true, default_file: 'perfect.wav' })
+
   await page.getByRole('button', { name: 'Reset to defaults' }).click()
   await expect(strength).toHaveValue('0.8')
   await expect(page.getByRole('spinbutton', { name: 'Seed' })).toHaveValue('145081676')
   await expect(page.locator('.debug-settings-status')).toHaveText('Saved for the next composition.')
-  expect(saves).toBe(2)
+  expect(saves).toBe(4)
   expect(settings).toMatchObject({
     strength: 0.8,
     steps: 8,
@@ -54,5 +69,7 @@ test('debug music controls autosave composition defaults', async ({ page }) => {
     repeat: false,
     input_mix: 0.95,
     match_input: true,
+    use_default: false,
+    default_file: 'default_sound.wav',
   })
 })

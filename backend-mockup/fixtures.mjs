@@ -18,6 +18,7 @@ export const defaultSettings = {
   prompt: 'Warm piano, soft acoustic guitar and a gentle rhythm.',
   negative_prompt: 'noise, distortion', seconds: 15, strength: 0.8, steps: 8,
   cfg: 2, seed: -1, repeat: false, input_mix: 0.95, match_input: true,
+  use_default: false, default_file: 'default_sound.wav',
 }
 export const defaultConfig = {
   delayMs: 180, tokenMs: 45, composeMs: 1800, liveMs: 700,

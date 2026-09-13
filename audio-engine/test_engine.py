@@ -72,6 +72,7 @@ class OptionsTests(unittest.TestCase):
             {"steps": 2.5}, {"seed": -2}, {"seed": 2**31}, {"cfg": 0},
             {"negative_prompt": None}, {"negative_prompt": "x" * 2001},
             {"input_mix": -0.1}, {"input_mix": 1.5},
+            {"use_default": "yes"}, {"default_file": "../audio.wav"},
         ]
         for change in cases:
             with self.subTest(change=change), self.assertRaises(ValueError):
@@ -218,6 +219,12 @@ class InterfaceTests(unittest.TestCase):
         compositions_patch = patch("app.COMPOSITIONS", Path(folder.name) / "compositions")
         compositions_patch.start()
         self.addCleanup(compositions_patch.stop)
+        assets = Path(folder.name) / "assets"
+        assets.mkdir()
+        sf.write(assets / "default_sound.wav", hum(rate=8000, seconds=1)[1], 8000, subtype="PCM_16")
+        assets_patch = patch("app.ASSETS", assets)
+        assets_patch.start()
+        self.addCleanup(assets_patch.stop)
         self.client = TestClient(app, base_url="http://127.0.0.1")
         buffer = io.BytesIO()
         rate, samples = hum()
@@ -317,6 +324,29 @@ class InterfaceTests(unittest.TestCase):
         for bad in ({"strength": 1}, [], {"unknown": 1}):
             self.assertEqual(self.client.post("/api/settings", json=bad).status_code, 400)
         self.assertEqual(self.client.get("/api/settings").json()["prompt"], "Dark synth")
+
+    @patch("app.compose")
+    @patch("app.require_ready", side_effect=RuntimeError("Setup required"))
+    def test_default_audio_skips_model_generation(self, ready, generate):
+        saved = self.client.post("/api/settings", json={
+            "prompt": "Piano", "use_default": True, "default_file": "default_sound.wav",
+        })
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertTrue(self.client.get("/api/status").json()["ready"])
+        response = self.client.post(
+            "/api/compose",
+            files={"audio": ("ignored.wav", b"not audio")},
+            data={"settings": "{}"},
+        )
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        audio, rate = sf.read(io.BytesIO(response.content), always_2d=True)
+        self.assertEqual((rate, audio.shape), (8000, (8000, 2)))
+        generate.assert_not_called()
+        ready.assert_not_called()
+        self.assertEqual(self.client.get("/api/assets").json(), ["default_sound.wav"])
+        self.assertEqual(self.client.post("/api/settings", json={
+            "prompt": "Piano", "use_default": True, "default_file": "missing.wav",
+        }).status_code, 400)
 
     def test_sample_folder_is_listed_without_hidden_files_or_traversal(self):
         with tempfile.TemporaryDirectory() as folder:

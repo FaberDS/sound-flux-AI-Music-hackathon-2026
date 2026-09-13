@@ -153,10 +153,12 @@
     gap: 12px;
   }
   .debug-music-settings input:not([type='checkbox']),
+  .debug-music-settings select,
   .debug-music-settings textarea {
     width: 100%;
   }
   .debug-music-settings textarea,
+  .debug-music-settings select,
   .debug-music-settings input[type='number'] {
     border: 1px solid var(--color-control-line);
     border-radius: 6px;
@@ -469,20 +471,53 @@
     align-items: end;
     padding: 10px;
   }
-  .composition-mode.session-active.focus-mode > .companion-content {
+  .session-active.focus-mode > .companion-content {
     align-content: center;
     grid-template-columns: minmax(0, min(94vw, 1200px));
     gap: 24px;
     padding: 24px 3vw 140px;
   }
-  .composition-mode.session-active.focus-mode > .companion-content > .amazing-grace-art,
-  .composition-mode.session-active.focus-mode > .companion-content > .focus-controls {
+  .session-active.focus-mode > .companion-content > .amazing-grace-art,
+  .session-active.focus-mode > .companion-content > .focus-controls {
     width: min(94vw, 1200px);
   }
-  .composition-mode.session-active.focus-mode > .companion-content > .amazing-grace-art img {
+  .session-active.focus-mode > .companion-content > .amazing-grace-art img {
     width: min(100%, 1100px);
     height: auto;
     max-height: 68dvh;
+  }
+  .composition-mode.session-active.focus-mode > .companion-content > .mouth-beatbox-focus {
+    order: 1;
+    display: block;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline {
+    order: 3;
+    width: min(90vw, 1000px);
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline .timeline-scale {
+    display: grid;
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline .timeline-track {
+    height: 46px;
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline .timeline-effect {
+    width: 40px;
+    height: 40px;
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline .timeline-effect svg {
+    width: 24px;
+    height: 24px;
+  }
+  .session-active.focus-mode > .companion-content > .composition-timeline .timeline-effect-list {
+    display: none;
+  }
+  .session-active.focus-mode > .companion-content > .focus-controls {
+    order: 4;
   }
   .session-active > .companion-content > .connection-row,
   .session-active .record-art,
@@ -576,6 +611,29 @@
     background: #fbf5e8;
     box-shadow: 0 8px 22px #70432f1f;
     animation: amazing-grace-fade-in 400ms ease-out both;
+  }
+  .camera-action {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 112px;
+    height: 112px;
+    border: 3px solid white;
+    border-radius: 50%;
+    background: #fffefae6;
+    color: var(--color-brown);
+    box-shadow: 0 8px 30px #30251e55;
+    pointer-events: none;
+    animation: camera-action-feedback 2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+  .camera-action-left {
+    --camera-action-exit: -260px;
+  }
+  .camera-action-right {
+    --camera-action-exit: 260px;
   }
   .composer-overlay {
     position: absolute;
@@ -798,6 +856,32 @@
     border: 2px solid var(--color-line);
     border-radius: 8px;
     background: #fffefa;
+  }
+  .mouth-beatbox-focus > .mouth-camera-row {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .mouth-beatbox-focus > .mouth-effect-settings {
+    display: none;
+  }
+  .mouth-focus-instrument {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+  }
+  .mouth-focus-instrument-icon {
+    display: grid;
+    place-items: center;
+    width: 96px;
+    height: 96px;
+    border: 2px solid var(--color-orange-strong);
+    border-radius: 50%;
+    background: #fffefa;
+    color: var(--color-brown);
+    box-shadow: 0 5px 18px #30251e26;
   }
   .mouth-camera {
     width: 100px;
@@ -1936,6 +2020,24 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes camera-action-feedback {
+  0% {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate(-50%, -50%) scale(0.75);
+  }
+  15%, 45% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translate(calc(-50% + var(--camera-action-exit)), -50%) scale(0.9);
   }
 }
 

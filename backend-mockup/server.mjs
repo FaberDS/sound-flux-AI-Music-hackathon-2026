@@ -47,7 +47,8 @@ function validateSettings(value) {
     check(Number.isFinite(value[key]) && value[key] >= min && value[key] <= max, `Invalid ${key}.`)
   }
   check(Number.isInteger(value.steps) && Number.isInteger(value.seed), 'Steps and seed must be integers.')
-  for (const key of ['repeat', 'match_input']) check(typeof value[key] === 'boolean', `Invalid ${key}.`)
+  for (const key of ['repeat', 'match_input', 'use_default']) check(typeof value[key] === 'boolean', `Invalid ${key}.`)
+  check(value.default_file === 'default_sound.wav', 'Choose a valid default audio file.')
   return value
 }
 function failureKey(method, path) {
@@ -119,8 +120,8 @@ export function createMockServer({ dataFile = resolve(here, '.data/state.json') 
   function engineState() {
     if (config.engine === 'cold' && setupUntil && Date.now() >= setupUntil) { config.engine = 'ready'; setupUntil = 0 }
     const busy = config.engine === 'cold' && setupUntil > Date.now()
-    const ready = config.engine === 'ready'
-    const message = ready ? 'Mock audio ready.' : config.engine === 'error' ? 'Mock model setup failed.' : busy ? 'Preparing mock audio…' : 'Mock audio needs setup.'
+    const ready = config.engine === 'ready' || data.settings.use_default
+    const message = data.settings.use_default ? 'Default audio ready. Generation is disabled.' : ready ? 'Mock audio ready.' : config.engine === 'error' ? 'Mock model setup failed.' : busy ? 'Preparing mock audio…' : 'Mock audio needs setup.'
     return { ready, message, model: 'mock-audio', setup: { busy, message }, studio_url: '/' }
   }
   function wav(res, composition, extra = {}) {
@@ -241,17 +242,19 @@ export function createMockServer({ dataFile = resolve(here, '.data/state.json') 
       }
       if (method === 'GET' && path === '/api/settings') return json(res, data.settings)
       if (method === 'POST' && path === '/api/settings') { data.settings = validateSettings({ ...data.settings, ...payload }); persist(); return json(res, data.settings) }
+      if (method === 'GET' && path === '/api/assets') return json(res, ['default_sound.wav'])
       if (method === 'GET' && path === '/api/samples') return json(res, ['mock-humming.wav'])
       if (method === 'GET' && path === '/samples/mock-humming.wav') return wav(res, { duration: 5, seed: 0, effects: [] })
       if (method === 'GET' && path === '/api/compositions') return json(res, data.compositions.map((item) => ({ ...item, url: `/api/compositions/${item.id}` })))
       if (method === 'DELETE' && path === '/api/compositions') { revision++; data.compositions = []; persist(); res.writeHead(204); return res.end() }
       if (method === 'POST' && path === '/api/compose') {
         check(payload.audio, 'Provide audio.', 422)
-        check(engineState().ready, 'The mock audio engine is not ready.', 503)
         let overrides
         try { overrides = JSON.parse(payload.settings || '{}') } catch { throw problem(400, 'Invalid generation settings.') }
         const settings = validateSettings({ ...data.settings, ...overrides })
-        await delay(config.composeMs, undefined, { signal })
+        engineState()
+        check(settings.use_default || config.engine === 'ready', 'The mock audio engine is not ready.', 503)
+        if (!settings.use_default) await delay(config.composeMs, undefined, { signal })
         check(requestRevision === revision, 'Mock data changed. Retry the request.', 409)
         const seed = settings.seed < 0 ? data.compositions.length + 3 : settings.seed
         const item = { id: `mock-${randomUUID()}`, created_at: new Date().toISOString(), duration: settings.seconds, seed, effects: [] }

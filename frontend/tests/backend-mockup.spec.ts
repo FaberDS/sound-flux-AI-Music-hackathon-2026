@@ -59,6 +59,7 @@ test('saved songs play real WAVs, remove effects, and support deletion and empty
 })
 
 test('live onboarding flows through SSE and speech into humming, setup and a saved composition', async ({ page, request }) => {
+  await page.clock.install()
   await control(request, 'reset', { preset: 'empty' })
   await control(request, 'config', { delayMs: 10, tokenMs: 10, liveMs: 100, speechSeconds: 0.2, composeMs: 1200, engine: 'cold' })
   // Keep real getUserMedia, MediaRecorder, audio decoding, WS and HTTP. Only
@@ -76,11 +77,25 @@ test('live onboarding flows through SSE and speech into humming, setup and a sav
     await page.getByRole('button', { name: 'Finish speaking', exact: true }).click()
     await expect.poll(async () => (await (await request.get('/api/v1/history')).json()).items[0]?.user).toBe(text)
   }
+  const player = page.getByRole('region', { name: 'Voice companion' })
+  await expect(player.getByRole('img', { name: 'Music artwork' })).toBeVisible()
+  await expect(player).toHaveClass(/focus-mode/)
   await expect(page.getByRole('button', { name: 'Humming…', exact: true })).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(1200)
   await page.evaluate(() => { (window as unknown as { mockHum: { amplitude: number } }).mockHum.amplitude = 0 })
   await expect(page.locator('.composer-overlay')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Your composition is playing' })).toBeVisible({ timeout: 15_000 })
+  await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible({ timeout: 15_000 })
+  await page.clock.fastForward(15_000)
+  const completion = page.getByRole('alertdialog', { name: 'Is your music complete?' })
+  await expect(completion).toBeVisible()
+  await expect(player.getByRole('button', { name: 'Play music' })).toBeVisible()
+  await completion.getByRole('button', { name: 'Keep making music' }).click()
+  await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
+  await page.clock.fastForward(15_000)
+  await page.getByRole('alertdialog', { name: 'Is your music complete?' })
+    .getByRole('button', { name: 'Complete and save' }).click()
+  await expect(page).toHaveURL(/\/songs$/)
+  await expect(page.locator('.song-card')).toHaveCount(1)
   expect((await (await request.get('/api/v1/profile')).json()).onboarding).toBeNull()
   expect(await (await request.get('/engine/api/compositions')).json()).toHaveLength(1)
   const logs = (await (await request.get(`${mock}/__mock`)).json()).logs

@@ -8,5 +8,7 @@
   "repeat": false,
   "negative_prompt": "incoherence, noise, lo-fi, bad quality, atonal, bad sound, noisy, glitchy, generic, boring, exaggerated, kitsch, corporate",
   "input_mix": 0.95,
-  "match_input": true
+  "match_input": true,
+  "use_default": true,
+  "default_file": "default_no_humming.wav"
 }

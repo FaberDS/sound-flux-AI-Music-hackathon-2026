@@ -14,11 +14,13 @@ export function MouthBeatbox({
   active,
   enabled,
   effects,
+  focused = false,
   onBeat,
 }: {
   active: boolean
   enabled: boolean
   effects: readonly { id: Instrument; name: string; icon: LucideIcon }[]
+  focused?: boolean
   onBeat: (effect: Instrument, intensity: number, volume: number, pitch: EffectPitch) => void
 }) {
   const video = useRef<HTMLVideoElement>(null)
@@ -182,10 +184,26 @@ export function MouthBeatbox({
     : enabled
       ? status
       : 'Camera is off'
-  const EffectIcon = effects.find((option) => option.id === effect)?.icon ?? effects[0].icon
+  const selectedEffect = effects.find((option) => option.id === effect) ?? effects[0]
+  const EffectIcon = selectedEffect.icon
 
   return (
-    <section className="mouth-beatbox" aria-label="Mouth beatbox">
+    <section
+      className={`mouth-beatbox ${focused ? 'mouth-beatbox-focus' : ''}`}
+      aria-label="Mouth beatbox"
+    >
+      {focused && (
+        <div
+          className="mouth-focus-instrument"
+          aria-label={`Current instrument: ${selectedEffect.name}`}
+          aria-live="polite"
+        >
+          <span className="mouth-focus-instrument-icon">
+            <EffectIcon size={48} strokeWidth={1.6} aria-hidden="true" />
+          </span>
+          <strong>{selectedEffect.name}</strong>
+        </div>
+      )}
       <div className="mouth-camera-row">
         {enabled && active && (
           <video ref={video} className="mouth-camera" muted playsInline />

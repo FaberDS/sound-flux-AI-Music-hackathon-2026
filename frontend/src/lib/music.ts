@@ -32,6 +32,8 @@ export interface MusicSettings {
   repeat: boolean
   input_mix: number
   match_input: boolean
+  use_default: boolean
+  default_file: string
 }
 
 export const DEFAULT_MUSIC_SETTINGS: MusicSettings = {
@@ -45,6 +47,17 @@ export const DEFAULT_MUSIC_SETTINGS: MusicSettings = {
   negative_prompt: 'incoherence, noise, lo-fi, bad quality, atonal, bad sound, noisy, glitchy, generic, boring, exaggerated, kitsch, corporate',
   input_mix: 0.95,
   match_input: true,
+  use_default: false,
+  default_file: 'default_sound.wav',
+}
+
+export async function getDefaultAudioFiles() {
+  const response = await fetch('/engine/api/assets')
+  if (!response.ok) throw new Error('The default audio files could not be loaded.')
+  const files: unknown = await response.json()
+  if (!Array.isArray(files) || !files.every((file) => typeof file === 'string'))
+    throw new Error('The default audio files could not be read.')
+  return files
 }
 
 export async function getMusicSettings() {
@@ -224,6 +237,16 @@ export class MusicRoom {
     this.autoReplay = value
     if (this.loop) this.loop.loop = value
     if (this.effectsLoop) this.effectsLoop.loop = value
+  }
+
+  async pause() {
+    if (this.context?.state === 'running') await this.context.suspend()
+  }
+
+  async resume() {
+    if (!this.context || (!this.loop && !this.timer)) return false
+    await this.context.resume()
+    return true
   }
 
   private note(

@@ -34,6 +34,8 @@ class Options:
     negative_prompt: str = ""
     input_mix: float = 0.0
     match_input: bool = False
+    use_default: bool = False
+    default_file: str = "default_sound.wav"
 
     def __post_init__(self):
         if not isinstance(self.prompt, str) or not 1 <= len(self.prompt.strip()) <= 2000:
@@ -48,9 +50,16 @@ class Options:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer between {low} and {high}.")
-        for name in ("repeat", "match_input"):
+        for name in ("repeat", "match_input", "use_default"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be true or false.")
+        if (
+            not isinstance(self.default_file, str)
+            or not 1 <= len(self.default_file) <= 255
+            or Path(self.default_file).name != self.default_file
+            or self.default_file.startswith(".")
+        ):
+            raise ValueError("Choose a valid default audio file.")
 
 
 def prepare_audio(audio, seconds, repeat=True):

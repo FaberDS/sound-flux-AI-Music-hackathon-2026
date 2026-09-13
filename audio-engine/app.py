@@ -26,6 +26,7 @@ setup_run = {"active": False, "error": None}
 WEB = Path(__file__).resolve().parent / "web"
 SETTINGS = Path(__file__).resolve().parent / "settings.json"
 AUDIO = Path(__file__).resolve().parent / "audio"
+ASSETS = Path(__file__).resolve().parent / "assets"
 COMPOSITIONS = Path(__file__).resolve().parent / "compositions"
 MAX_UPLOAD = 25 * 1024 * 1024
 composition_lock = threading.Lock()
@@ -67,6 +68,10 @@ def index():
 def status(request: Request):
     setup = setup_status()
     setup["busy"] = setup["busy"] or setup_run["active"]
+    if saved_settings().get("use_default"):
+        message = "Default audio ready. Generation is disabled."
+        setup["message"] = message
+        return {"ready": True, "message": message, "model": MODEL_ID, "setup": setup, "studio_url": str(request.base_url)}
     try:
         require_ready()
         ready, message = True, "Model ready. Everything runs on this Mac."
@@ -99,6 +104,16 @@ def saved_settings():
         return json.loads(SETTINGS.read_text())
     except FileNotFoundError:
         return {}
+
+
+def asset_names():
+    return sorted(path.name for path in ASSETS.glob("*") if path.is_file() and not path.name.startswith("."))
+
+
+def default_audio_path(options: Options):
+    if options.default_file not in asset_names():
+        raise ValueError("The selected default audio file is unavailable.")
+    return ASSETS / options.default_file
 
 
 def composition_path(identifier: str):
@@ -214,6 +229,8 @@ def get_settings():
 async def save_settings(request: Request):
     try:
         options = Options(**await request.json())
+        if options.use_default:
+            default_audio_path(options)
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     temporary = SETTINGS.with_suffix(".partial")
@@ -226,6 +243,11 @@ async def save_settings(request: Request):
 def samples():
     # ponytail: the browser decodes these (m4a, mp3, wav...), so the server only lists and serves them.
     return sorted(path.name for path in AUDIO.glob("*") if path.is_file() and not path.name.startswith("."))
+
+
+@app.get("/api/assets")
+def assets():
+    return asset_names()
 
 
 @app.get("/api/compositions")
@@ -367,24 +389,35 @@ async def generate(audio: UploadFile = File(), settings: str = Form()):
         if len(settings) > 4096:
             raise ValueError("Generation settings are too long.")
         options = Options(**(saved_settings() | json.loads(settings)))
-        payload = await audio.read(MAX_UPLOAD + 1)
-        if len(payload) > MAX_UPLOAD:
-            raise ValueError("Upload a recording smaller than 25 MB.")
-        with sf.SoundFile(io.BytesIO(payload)) as handle:
-            if not 1 <= handle.frames / handle.samplerate <= 30 or handle.channels not in (1, 2):
-                raise ValueError("Upload 1 to 30 seconds of mono or stereo audio.")
-            rate = handle.samplerate
-            samples = handle.read(dtype="float32", always_2d=True)
+        if options.use_default:
+            with sf.SoundFile(default_audio_path(options)) as handle:
+                if handle.channels not in (1, 2):
+                    raise ValueError("Default audio must be mono or stereo.")
+                rate = handle.samplerate
+                result = handle.read(dtype="float32", always_2d=True)
+                if handle.channels == 1:
+                    result = np.repeat(result, 2, axis=1)
+            seed = 0 if options.seed < 0 else options.seed
+        else:
+            payload = await audio.read(MAX_UPLOAD + 1)
+            if len(payload) > MAX_UPLOAD:
+                raise ValueError("Upload a recording smaller than 25 MB.")
+            with sf.SoundFile(io.BytesIO(payload)) as handle:
+                if not 1 <= handle.frames / handle.samplerate <= 30 or handle.channels not in (1, 2):
+                    raise ValueError("Upload 1 to 30 seconds of mono or stereo audio.")
+                rate = handle.samplerate
+                samples = handle.read(dtype="float32", always_2d=True)
     except (TypeError, ValueError, sf.LibsndfileError) as exc:
         raise HTTPException(400, str(exc)) from exc
     finally:
         await audio.close()
-    try:
-        rate, result, seed = await run_in_threadpool(compose, (rate, samples), options)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
+    if not options.use_default:
+        try:
+            rate, result, seed = await run_in_threadpool(compose, (rate, samples), options)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
     identifier = save_composition(rate, result, seed)
     output = io.BytesIO()
     sf.write(output, result, rate, format="WAV", subtype="PCM_16")

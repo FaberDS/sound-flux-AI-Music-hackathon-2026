@@ -39,6 +39,7 @@ import {
   deleteAllCompositions,
   deleteComposition,
   deleteCompositionEffect,
+  getDefaultAudioFiles,
   getCompositions,
   getMusicSettings,
   MusicRoom,
@@ -113,6 +114,7 @@ const amazingGraceImages = [
   amazingGraceWedding,
 ]
 const layerVolumeKey = 'sound-flux-layer-volumes'
+const completionPromptDelay = 15_000
 
 function savedLayerVolumes() {
   try {
@@ -326,6 +328,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
   const [cameraEnabled, setCameraEnabled] = useState(false)
   const [cameraPromptOpen, setCameraPromptOpen] = useState(false)
+  const [completionPromptOpen, setCompletionPromptOpen] = useState(false)
   const [volume, setVolume] = useState(0.45)
   const [layerVolumes, setLayerVolumes] = useState(savedLayerVolumes)
   const [readAloud, setReadAloud] = useState(true)
@@ -336,6 +339,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   >('checking')
   const [musicError, setMusicError] = useState('')
   const [musicSettings, setMusicSettings] = useState<MusicSettings>(DEFAULT_MUSIC_SETTINGS)
+  const [defaultAudioFiles, setDefaultAudioFiles] = useState<string[]>([])
   const [musicSettingsStatus, setMusicSettingsStatus] = useState('Loading music settings…')
   const [seeding, setSeeding] = useState(false)
   const [amazingGraceImage] = useState(
@@ -344,6 +348,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [activeInstrument, setActiveInstrument] = useState<Instrument | null>(
     null,
   )
+  const [cameraAction, setCameraAction] = useState<{
+    direction: 'left' | 'right'
+    effect: Instrument
+    key: number
+  } | null>(null)
   const [compositions, setCompositions] = useState<SavedComposition[]>([])
   const [activeCompositionId, setActiveCompositionId] = useState<string | null>(
     null,
@@ -352,6 +361,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [styleReady, setStyleReady] = useState(false)
   const [music] = useState(() => new MusicRoom(() => setPlaying(false)))
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cameraActionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const musicSettingsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const musicSettingsVersion = useRef(0)
   const healthRequest = useRef<AbortController | null>(null)
@@ -361,7 +371,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const saved = useSavedData()
   const refreshSaved = saved.refresh
   const requestMusic = useCallback(() => setMusicRequest((value) => value + 1), [])
-  const beginMusicPreparation = useCallback(() => setStyleReady(false), [])
+  const beginMusicPreparation = useCallback(() => {
+    setFocusMode(true)
+    setStyleReady(false)
+  }, [])
   const companion = useCompanion(
     saved.history,
     readAloud,
@@ -374,7 +387,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     beginMusicPreparation,
   )
   const compositionMode = activeCompositionId !== null
-  const focusedComposition = compositionMode && focusMode
+  const focusedPlayMode = focusMode && (compositionMode || companion.playMode)
   const activeComposition = compositions.find(
     (composition) => composition.id === activeCompositionId,
   )
@@ -492,6 +505,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
         if (active) setMusicSettingsStatus('Music engine unavailable. Reload to try again.')
       },
     )
+    void getDefaultAudioFiles().then(
+      (files) => {
+        if (active) setDefaultAudioFiles(files)
+      },
+      () => {},
+    )
     return () => {
       active = false
     }
@@ -509,10 +528,26 @@ export default function App({ debug = false }: { debug?: boolean }) {
     music.setMusicVolume(layerVolumes.music)
     music.setEffectsVolume(layerVolumes.effects)
   }, [layerVolumes, music])
+  useEffect(() => {
+    if (!playing || !compositionMode || completionPromptOpen) return
+    let active = true
+    const timer = setTimeout(() => {
+      void music.pause().catch(() => music.stop()).then(() => {
+        if (!active) return
+        setPlaying(false)
+        setCompletionPromptOpen(true)
+      })
+    }, completionPromptDelay)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [completionPromptOpen, compositionMode, music, playing])
   useEffect(
     () => () => {
       music.dispose()
       if (flashTimer.current) clearTimeout(flashTimer.current)
+      if (cameraActionTimer.current) clearTimeout(cameraActionTimer.current)
     },
     [music],
   )
@@ -575,7 +610,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   )
   const beat = useCallback((effect: Instrument, intensity: number, volume: number, pitch: EffectPitch) => {
     const at = music.beat(effect, intensity, volume, pitch)
-    if (at === null || !activeCompositionId) return
+    if (at === null || !activeCompositionId) return false
     void saveCompositionEffect(activeCompositionId, {
       at,
       effect,
@@ -599,7 +634,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
       },
       () => setMusicError('The effect played, but could not be saved.'),
     )
+    return true
   }, [activeComposition, activeCompositionId, music, playing])
+  const cameraBeat = useCallback((effect: Instrument, intensity: number, volume: number, pitch: EffectPitch) => {
+    if (!beat(effect, intensity, volume, pitch)) return
+    setCameraAction({
+      direction: Math.random() < 0.5 ? 'left' : 'right',
+      effect,
+      key: Date.now(),
+    })
+    if (cameraActionTimer.current) clearTimeout(cameraActionTimer.current)
+    cameraActionTimer.current = setTimeout(() => setCameraAction(null), 2_000)
+  }, [beat])
   const playRhythm = useCallback((effect: Instrument, pitch: EffectPitch) => {
     if (compositionMode && playing) beat(effect, 0.8, 1, pitch)
     else void playInstrument(effect)
@@ -609,6 +655,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
     savesToSong: compositionMode && playing,
     onPlay: playRhythm,
   })
+  const CameraActionIcon = cameraAction
+    ? instruments.find(({ id }) => id === cameraAction.effect)?.icon ?? Drum
+    : Drum
   const removeEffect = useCallback((effectId: string) => {
     if (!activeCompositionId) return
     void deleteCompositionEffect(activeCompositionId, effectId).then(
@@ -731,6 +780,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
       setActiveCompositionId(null)
       setMusicError('The saved composition could not be played.')
     }
+  }
+  async function continueComposition() {
+    setCompletionPromptOpen(false)
+    try {
+      setPlaying(await music.resume())
+    } catch {
+      music.stop()
+      setMusicError('The sound could not continue. Please play it again.')
+    }
+  }
+  async function completeComposition() {
+    setCompletionPromptOpen(false)
+    stopAll()
+    await refreshCompositions()
+    navigatePage('songs')
   }
   async function removeComposition(composition: SavedComposition) {
     if (!window.confirm('Delete this song from this device? This cannot be undone.')) return
@@ -904,6 +968,26 @@ export default function App({ debug = false }: { debug?: boolean }) {
           <h2>Composition defaults</h2>
           <p>Changes save automatically and apply to the next composition.</p>
           <form className="debug-music-settings" onSubmit={(event) => event.preventDefault()}>
+              <label className="check wide">
+                <input
+                  type="checkbox"
+                  checked={musicSettings.use_default}
+                  onChange={(event) => updateMusicSetting('use_default', event.currentTarget.checked)}
+                />
+                <span>Use default audio instead of generating</span>
+              </label>
+              <label className="wide">
+                <span>Default audio file</span>
+                <select
+                  value={musicSettings.default_file}
+                  disabled={!musicSettings.use_default || defaultAudioFiles.length === 0}
+                  onChange={(event) => updateMusicSetting('default_file', event.currentTarget.value)}
+                >
+                  {defaultAudioFiles.length === 0 && <option value="">No audio files found</option>}
+                  {defaultAudioFiles.map((file) => <option key={file} value={file}>{file}</option>)}
+                </select>
+                <small>Files from audio-engine/assets. The selected file skips model generation.</small>
+              </label>
               <label className="wide">
                 <span>Music description</span>
                 <textarea
@@ -1223,14 +1307,14 @@ export default function App({ debug = false }: { debug?: boolean }) {
           </div>
           <section
             ref={companionRef}
-            className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''} ${focusedComposition ? 'focus-mode' : ''}`}
+            className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''} ${focusedPlayMode ? 'focus-mode' : ''}`}
             aria-label="Voice companion"
             role={busy ? 'dialog' : undefined}
             aria-modal={busy || undefined}
             tabIndex={-1}
           >
             <div className="companion-content">
-            {compositionMode && !focusedComposition && <div className="connection-row">
+            {compositionMode && !focusedPlayMode && <div className="connection-row">
               {compositionMode && (
                 <button
                   type="button"
@@ -1284,12 +1368,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
             ) : showAmazingGrace ? (
               <AmazingGraceArtwork
                 src={
-                  compositionMode
+                  compositionMode && !companion.playMode
                     ? compositionArtwork(activeCompositionId ?? '')
                     : amazingGraceImage
                 }
                 alt={compositionMode ? 'Artwork for your saved composition' : 'Music artwork'}
               >
+                {cameraAction && (
+                  <span
+                    key={cameraAction.key}
+                    className={`camera-action camera-action-${cameraAction.direction} instrument-${cameraAction.effect}`}
+                    aria-hidden="true"
+                  >
+                    <CameraActionIcon size={64} strokeWidth={1.7} />
+                  </span>
+                )}
                 {capturePhase === 'composing' && (
                   <div className="composer-overlay" role="status">
                     <SoundFlux
@@ -1320,7 +1413,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
             ) : (
               <RecordArtwork active={playing} />
             )}
-            {focusedComposition && (
+            {focusedPlayMode && (
               <div className="focus-controls" aria-label="Focus mode controls">
                 <button className="focus-back" onClick={() => {
                   stopAll()
@@ -1328,16 +1421,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 }}>
                   <ArrowLeft size={20} /> Back to home
                 </button>
-                <button className="music-button focus-play" onClick={() => void toggleMusic()}>
-                  {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
-                  {playing ? 'Pause music' : 'Play music'}
-                </button>
+                {compositionMode && (
+                  <button className="music-button focus-play" onClick={() => void toggleMusic()}>
+                    {playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                    {playing ? 'Pause music' : 'Play music'}
+                  </button>
+                )}
                 <button className="focus-show-all" onClick={() => setFocusMode(false)}>
                   Show all
                 </button>
               </div>
             )}
-            {!focusedComposition && <div
+            {!focusedPlayMode && <div
               className="companion-message"
               aria-live="polite"
               aria-atomic="true"
@@ -1364,7 +1459,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 </p>
               )}
             </div>}
-            {compositionMode && !focusedComposition && (
+            {compositionMode && !focusedPlayMode && (
               <>
                 <div className="composition-controls">
                   <button className="music-button" onClick={() => void toggleMusic()}>
@@ -1443,17 +1538,22 @@ export default function App({ debug = false }: { debug?: boolean }) {
                     </label>
                   </fieldset>
                 </div>
-                <CompositionTimeline
-                  composition={activeComposition}
-                  onRemove={removeEffect}
-                />
-                <MouthBeatbox
-                  active={playing}
-                  enabled={cameraEnabled}
-                  effects={instruments}
-                  onBeat={beat}
-                />
               </>
+            )}
+            {compositionMode && (
+              <CompositionTimeline
+                composition={activeComposition}
+                onRemove={removeEffect}
+              />
+            )}
+            {compositionMode && (
+              <MouthBeatbox
+                active={playing}
+                enabled={cameraEnabled}
+                effects={instruments}
+                focused={focusedPlayMode}
+                onBeat={cameraBeat}
+              />
             )}
             {companion.error && (
               <p role="alert" className="error-message mt-3">
@@ -1617,6 +1717,33 @@ export default function App({ debug = false }: { debug?: boolean }) {
       </main>
       )}
       {playing && !busy && <FloatingSessionControls conversation={false} onStop={stopAll} />}
+      <Dialog
+        open={completionPromptOpen}
+        onClose={() => void continueComposition()}
+        title="Is your music complete?"
+        alert
+      >
+        <div className="camera-alert-copy">
+          <span aria-hidden="true"><Music2 size={30} /></span>
+          <p>Save your music now, or keep adding sounds.</p>
+        </div>
+        <div className="camera-alert-actions">
+          <button
+            type="button"
+            className="dialog-primary"
+            onClick={() => void completeComposition()}
+          >
+            <Check size={20} /> Complete and save
+          </button>
+          <button
+            type="button"
+            className="dialog-primary"
+            onClick={() => void continueComposition()}
+          >
+            <Music2 size={20} /> Keep making music
+          </button>
+        </div>
+      </Dialog>
       <Dialog
         open={cameraPromptOpen}
         onClose={() => setCameraPromptOpen(false)}
