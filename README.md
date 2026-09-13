@@ -1,33 +1,63 @@
 # Sound Flux
 
-## Gemeinsam starten
+Sound Flux is an accessible, local-first music companion. It helps people make
+and enjoy music through simple gestures, humming, speech, and large on-screen
+instruments—without needing musical training.
 
-Im Root des Repositories:
+The project grew through two early browser prototypes before becoming the
+integrated application in [`frontend`](frontend/):
+
+| Version | Idea explored | What it contributed |
+| --- | --- | --- |
+| [Draft 1](denis-v1/) | A camera-controlled instrument for people who prefer or need hands-free interaction | Face tracking, personalised movement calibration, head-gesture drums, and optional MIDI |
+| [Draft 2](denis-v2/) | A calm music session for people living with dementia or Alzheimer’s and their care partners | A low-pressure flow, familiar-music prompts, humming and clapping, tap instruments, and a care profile |
+| [Current app](frontend/) | One shared music room built from the strongest parts of both drafts | Local voice conversation, saved profiles and history, browser instruments, beatboxing, and humming-to-music generation |
+
+The drafts are intentionally kept in the repository as small, runnable records
+of the product's evolution. Each has its own README and product specification.
+
+## How it works
+
+- The **React frontend** provides the music room, instruments, microphone controls,
+  profile, and conversation history.
+- The **local speech companion** transcribes speech, talks through Ollama, and
+  reads replies aloud.
+- The **audio engine** turns a hummed melody into a looping composition with
+  Stable Audio 3 Medium on Apple Silicon.
+
+Speech, profile data, and generated music stay on the local machine.
+
+## Run the project
+
+You need macOS on Apple Silicon, Node.js 22.12 or newer, npm,
+[`uv`](https://docs.astral.sh/uv/), Ollama, and FFmpeg. Follow the one-time model
+setup in [`local-speech/README.md`](local-speech/README.md) and
+[`audio-engine/README.md`](audio-engine/README.md), then run from the repository
+root:
 
 ```sh
 ./start.sh
 ```
 
-Das Skript startet das React-Frontend unter [localhost:5173](http://localhost:5173), die Sprach-API unter [127.0.0.1:8000](http://127.0.0.1:8000) und die Audio Engine unter [127.0.0.1:7860](http://127.0.0.1:7860). Läuft ein Dienst bereits, wird er weiterverwendet. Node.js ab 22.12, npm und [uv](https://docs.astral.sh/uv/) müssen installiert sein. Fehlende Frontend-Abhängigkeiten installiert es mit `npm ci`; `uv run` synchronisiert die API-Abhängigkeiten aus `uv.lock`. Mit `Ctrl+C` beendet es die gestarteten Services samt Kindprozessen.
-
-Das Skript funktioniert auch bei Aufruf aus einem anderen Arbeitsverzeichnis. Falls Port 5173 belegt ist, bricht der Start ab. Alternativ lässt sich ein anderer Port wählen:
+Open [localhost:5173](http://localhost:5173). The script also starts the speech
+API on port `8000` and the audio engine on port `7860`; `Ctrl+C` stops all three.
+If port `5173` is unavailable, choose another one:
 
 ```sh
 FRONTEND_PORT=5174 ./start.sh
 ```
 
-## Eigene Services ergänzen
+## Project map
 
-In `start.sh` ist der Abschnitt `Services` für weitere Teambeiträge vorbereitet:
-
-```bash
-start_service "Anzeigename" "ordner-relativ-zum-root" befehl argumente
+```text
+frontend/      Current React application
+local-speech/  Local transcription, conversation, and text-to-speech
+audio-engine/  Local humming-to-music generation
+denis-v1/      Draft 1: camera and head-gesture instrument
+denis-v2/      Draft 2: memory-focused music session
+sensors/       Arduino sensor experiment
+start.sh       Shared development launcher
 ```
 
-Die Funktion wechselt in den angegebenen Ordner und startet den Befehl parallel zu den anderen Services. Der Befehl selbst soll im Vordergrund bleiben, also kein zusätzliches `&` oder Daemon-Modus. Die Ausgabe aller Services erscheint im selben Terminal. Endet ein Service, beendet das Skript auch die übrigen und übernimmt seinen Exit-Code.
-
-Nötige Vorbereitungsschritte oberhalb des Service-Abschnitts ergänzen. Abhängigkeiten zwischen Services und deren Bereitschaft muss die jeweilige Integration berücksichtigen.
-
-Das Frontend erwartet die Sprach-API standardmäßig unter `http://127.0.0.1:8000`; die Adresse kann in `frontend/.env.local` über `API_TARGET` angepasst werden. Instrumente und lokale Melodien funktionieren bereits ohne diese API.
-
-Weitere Frontend-Details stehen in [frontend/README.md](frontend/README.md).
+For development commands, API details, and tests, see the README in each
+component directory.

@@ -6,6 +6,8 @@ export interface SavedComposition {
   id: string
   created_at: string
   url: string
+  duration: number
+  beats: number[]
 }
 
 export async function getCompositions(signal: AbortSignal) {
@@ -24,9 +26,26 @@ export async function getCompositions(signal: AbortSignal) {
         id: item.id,
         created_at: item.created_at,
         url: `/engine/api/compositions/${encodeURIComponent(item.id)}`,
+        duration: typeof item.duration === 'number' ? item.duration : 0,
+        beats: Array.isArray(item.beats)
+          ? item.beats.filter((beat: unknown): beat is number => typeof beat === 'number')
+          : [],
       })
     return items
   }, [])
+}
+
+export async function saveCompositionBeat(identifier: string, at: number) {
+  const response = await fetch(
+    `/engine/api/compositions/${encodeURIComponent(identifier)}/beats`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ at }),
+    },
+  )
+  if (!response.ok) throw new Error('The mouth beat could not be saved.')
+  return response.json() as Promise<{ duration: number; beats: number[] }>
 }
 
 export class MusicRoom {
@@ -35,6 +54,8 @@ export class MusicRoom {
   private timer: ReturnType<typeof setInterval> | null = null
   private voices = new Set<AudioScheduledSourceNode>()
   private loop: AudioBufferSourceNode | null = null
+  private loopStartedAt = 0
+  private loopDuration = 0
   private stream: MediaStream | null = null
   private input: MediaStreamAudioSourceNode | null = null
   private analyser: AnalyserNode | null = null
@@ -130,8 +151,16 @@ export class MusicRoom {
   }
 
   beat() {
-    if (!this.context || this.context.state === 'closed' || !this.gain) return
+    if (
+      !this.context ||
+      this.context.state === 'closed' ||
+      !this.gain ||
+      !this.loop ||
+      !this.loopDuration
+    )
+      return null
     this.note(60, 'drum', 0.4, 0.32)
+    return (this.context.currentTime - this.loopStartedAt) % this.loopDuration
   }
 
   async start(mood: Mood) {
@@ -231,6 +260,8 @@ export class MusicRoom {
     this.loop.buffer = buffer
     this.loop.loop = true
     this.loop.connect(this.gain!)
+    this.loopStartedAt = this.context!.currentTime
+    this.loopDuration = buffer.duration
     this.loop.start()
   }
 
@@ -412,6 +443,7 @@ export class MusicRoom {
       this.loop.disconnect()
       this.loop = null
     }
+    this.loopDuration = 0
     this.voices.forEach((voice) => {
       try {
         voice.stop()

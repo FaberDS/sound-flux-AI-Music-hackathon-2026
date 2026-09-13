@@ -1,11 +1,14 @@
 import io
 import json
+import math
 import os
 import re
+import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -24,6 +27,7 @@ SETTINGS = Path(__file__).resolve().parent / "settings.json"
 AUDIO = Path(__file__).resolve().parent / "audio"
 COMPOSITIONS = Path(__file__).resolve().parent / "compositions"
 MAX_UPLOAD = 25 * 1024 * 1024
+composition_lock = threading.Lock()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
 
@@ -102,6 +106,18 @@ def composition_path(identifier: str):
     return COMPOSITIONS / f"{identifier}.wav"
 
 
+def beat_path(identifier: str):
+    return COMPOSITIONS / f"{identifier}.beats.json"
+
+
+def composition_beats(identifier: str):
+    try:
+        values = json.loads(beat_path(identifier).read_text())
+        return [value for value in values if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0]
+    except (FileNotFoundError, json.JSONDecodeError, TypeError):
+        return []
+
+
 def save_composition(rate, samples, seed):
     COMPOSITIONS.mkdir(exist_ok=True)
     identifier = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{seed}"
@@ -143,6 +159,8 @@ def compositions():
             "id": path.stem,
             "created_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "url": f"/api/compositions/{path.stem}",
+            "duration": sf.info(path).duration,
+            "beats": composition_beats(path.stem),
         }
         for path in sorted(COMPOSITIONS.glob("*.wav"), key=lambda path: path.stat().st_mtime, reverse=True)
         if re.fullmatch(r"[0-9]{8}T[0-9]{12}Z-[0-9]+", path.stem)
@@ -155,6 +173,42 @@ def composition(identifier: str):
     if not path.is_file():
         raise HTTPException(404, "Composition not found.")
     return FileResponse(path, media_type="audio/wav", filename=path.name)
+
+
+@app.post("/api/compositions/{identifier}/beats")
+async def add_composition_beat(identifier: str, request: Request):
+    try:
+        body = await request.json()
+        at = body["at"]
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+            raise ValueError
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, "Beat time must be a finite number.") from exc
+    path = composition_path(identifier)
+    if not path.is_file():
+        raise HTTPException(404, "Composition not found.")
+
+    # ponytail: one local user; use per-composition locks if concurrent editing ever matters.
+    with composition_lock:
+        samples, rate = sf.read(path, dtype="float32", always_2d=True)
+        duration = len(samples) / rate
+        if not 0 <= at < duration:
+            raise HTTPException(400, "Beat time must be inside the composition.")
+        length = round(0.4 * rate)
+        time = np.arange(length, dtype=np.float32) / rate
+        phase = 2 * np.pi * (145 * time - 50 / 0.4 * time**2)
+        envelope = np.minimum(time / 0.012, 1) * np.exp(-7 * time / 0.4) * 0.32
+        start = round(at * rate)
+        samples[(start + np.arange(length)) % len(samples)] += (np.sin(phase) * envelope)[:, None]
+        samples = np.clip(samples, -0.99, 0.99)
+        temporary = path.with_suffix(".partial.wav")
+        sf.write(temporary, samples, rate, format="WAV", subtype="PCM_16")
+        temporary.replace(path)
+        beats = sorted([*composition_beats(identifier), float(at)])
+        metadata = beat_path(identifier)
+        metadata.with_suffix(".partial.json").write_text(json.dumps(beats))
+        metadata.with_suffix(".partial.json").replace(metadata)
+    return {"duration": duration, "beats": beats}
 
 
 @app.post("/api/compose")

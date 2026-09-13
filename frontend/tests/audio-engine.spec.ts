@@ -57,6 +57,8 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
       json: [{
         id: '20260913T123456123456Z-42',
         created_at: '2026-09-13T12:34:56Z',
+        duration: 2,
+        beats: [0.5],
       }],
     }),
   )
@@ -68,6 +70,9 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   ).toBeVisible()
   await expect(
     page.getByRole('img', { name: 'Artwork for your saved composition' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('img', { name: 'Composition timeline with 1 mouth beat' }),
   ).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Voice companion' })

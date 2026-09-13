@@ -326,6 +326,29 @@ class InterfaceTests(unittest.TestCase):
                 self.assertEqual(self.client.get("/api/samples").json(), ["a.wav", "b.m4a"])
         self.assertEqual(self.client.get("/samples/../app.py").status_code, 404)
 
+    def test_mouth_beat_is_mixed_into_saved_composition(self):
+        from app import COMPOSITIONS, composition_path
+        identifier = "20260913T123456123456Z-42"
+        COMPOSITIONS.mkdir()
+        sf.write(composition_path(identifier), np.zeros((16000, 2)), 8000, subtype="PCM_16")
+
+        response = self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 0.5})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"duration": 2.0, "beats": [0.5]})
+        mixed, _ = sf.read(composition_path(identifier))
+        self.assertGreater(np.max(np.abs(mixed[4000:7200])), 0.1)
+        response = self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 1.9})
+        self.assertEqual(response.json()["beats"], [0.5, 1.9])
+        mixed, _ = sf.read(composition_path(identifier))
+        self.assertGreater(np.max(np.abs(mixed[:2400])), 0.01)
+        library = self.client.get("/api/compositions").json()
+        self.assertEqual((library[0]["duration"], library[0]["beats"]), (2.0, [0.5, 1.9]))
+        self.assertEqual(
+            self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 2}).status_code,
+            400,
+        )
+
     @patch("app.compose", side_effect=RuntimeError("Model setup is incomplete. Run prepare.py"))
     def test_generation_error_reaches_user(self, generate):
         response = self.client.post("/api/compose", files=self.upload, data=self.settings)

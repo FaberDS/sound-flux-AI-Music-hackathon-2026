@@ -31,6 +31,7 @@ import { checkConnection, preseedOnboarding } from './lib/api'
 import {
   getCompositions,
   MusicRoom,
+  saveCompositionBeat,
   type CapturePhase,
   type Instrument,
   type Mood,
@@ -204,6 +205,34 @@ function AmazingGraceArtwork({
   )
 }
 
+function CompositionTimeline({ composition }: { composition?: SavedComposition }) {
+  if (!composition?.duration) return null
+  const time = (seconds: number) =>
+    `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+  return (
+    <div
+      className="composition-timeline"
+      role="img"
+      aria-label={`Composition timeline with ${composition.beats.length} mouth ${composition.beats.length === 1 ? 'beat' : 'beats'}`}
+    >
+      <span>0:00</span>
+      <div className="timeline-track" aria-hidden="true">
+        {composition.beats.map((beat, index) => (
+          <span
+            key={`${beat}-${index}`}
+            className="timeline-beat"
+            style={{ left: `${Math.max(2, Math.min(98, beat / composition.duration * 100))}%` }}
+            title={`Mouth beat at ${time(beat)}`}
+          >
+            <Drum size={18} />
+          </span>
+        ))}
+      </div>
+      <span>{time(composition.duration)}</span>
+    </div>
+  )
+}
+
 export default function App({ debug = false }: { debug?: boolean }) {
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
@@ -250,6 +279,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
     beginMusicPreparation,
   )
   const compositionMode = activeCompositionId !== null
+  const activeComposition = compositions.find(
+    (composition) => composition.id === activeCompositionId,
+  )
   const preparingMusicStyle = companion.playMode && !styleReady
   const busy =
     companion.phase !== 'idle' ||
@@ -373,7 +405,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
     },
     [music],
   )
-  const beat = useCallback(() => music.beat(), [music])
+  const beat = useCallback(() => {
+    const at = music.beat()
+    if (at === null || !activeCompositionId) return
+    void saveCompositionBeat(activeCompositionId, at).then(
+      ({ beats, duration }) => {
+        setCompositions((items) =>
+          items.map((item) =>
+            item.id === activeCompositionId ? { ...item, beats, duration } : item,
+          ),
+        )
+        setMusicError('')
+      },
+      () => setMusicError('The beat played, but could not be saved.'),
+    )
+  }, [activeCompositionId, music])
   const stopAll = () => {
     music.stop()
     setCapturePhase('idle')
@@ -763,6 +809,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   </button>
                   <button onClick={stopAll}>Back to your songs</button>
                 </div>
+                <CompositionTimeline composition={activeComposition} />
                 <MouthBeatbox active={playing} onBeat={beat} />
               </>
             )}

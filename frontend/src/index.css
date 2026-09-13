@@ -287,7 +287,10 @@
     order: 3;
   }
   .companion-card > .mouth-beatbox {
-    order: 4;
+    order: 6;
+  }
+  .companion-card > .composition-timeline {
+    order: 5;
   }
   .companion-card > .replay-button {
     order: 4;
@@ -333,7 +336,7 @@
     order: 4;
   }
   .session-active > .mouth-beatbox {
-    order: 5;
+    order: 6;
   }
   .session-active > :first-child,
   .session-active .record-art,
@@ -341,6 +344,7 @@
   .session-active .companion-message,
   .session-active .voice-controls,
   .session-active .composition-controls,
+  .session-active .composition-timeline,
   .session-active .replay-button,
   .session-active .companion-footnote,
   .session-active > .error-message {
@@ -610,6 +614,39 @@
     color: var(--color-brown);
     font-size: 15px;
     font-weight: 700;
+  }
+  .composition-timeline {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    color: var(--color-muted);
+    font-size: 14px;
+  }
+  .timeline-track {
+    position: relative;
+    height: 38px;
+  }
+  .timeline-track::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    border-top: 3px solid var(--color-line);
+  }
+  .timeline-beat {
+    position: absolute;
+    top: 50%;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--color-orange);
+    border-radius: 50%;
+    background: #fffefa;
+    color: var(--color-brown);
+    transform: translate(-50%, -50%);
   }
   .composition-mode .voice-controls,
   .composition-mode .replay-button,
