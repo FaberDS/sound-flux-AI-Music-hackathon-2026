@@ -13,6 +13,18 @@ Im Repository-Root:
 ./start-dev.sh
 ```
 
+Im Terminal fragt das Skript beide Ports ab. Mit Enter übernimmst du den
+jeweiligen Standardwert:
+
+```text
+Frontend-Port [5173]: 5174
+Mock-Backend-Port [8001]: 8002
+```
+
+Bei belegten, ungültigen oder gleichen Ports fragt es erneut. Das Frontend
+verbindet sich automatisch mit dem gewählten Mock-Port. Beide Adressen erscheinen
+nach dem Start im Terminal. Mit den Standardports gelten diese Adressen:
+
 - Frontend: <http://localhost:5173>
 - Mock-Steuerung: <http://127.0.0.1:8001/?frontendPort=5173>
 - Frontend-Debugansicht: <http://localhost:5173/debug>
@@ -22,12 +34,16 @@ Das Skript installiert fehlende npm-Abhängigkeiten, startet beide Prozesse und
 prüft die Verbindung vom Frontend zum Mock. Vite lädt Frontend-Änderungen sofort.
 Der Mock läuft dabei weiter. `Ctrl+C` beendet beide gestarteten Prozessgruppen.
 
-Ist ein Port belegt, beendet das Skript den Start, ohne fremde Prozesse zu
-stoppen oder ein Frontend mit unbekannter Backend-Verbindung zu übernehmen:
+Du kannst die Ports auch direkt vorgeben. Freie, gültige Vorgaben übernimmt
+das Skript ohne Rückfrage:
 
 ```sh
 FRONTEND_PORT=5174 MOCK_PORT=8002 ./start-dev.sh
 ```
+
+Ohne interaktives Terminal verwendet es die Vorgaben oder die Standardports.
+Bei einem Portkonflikt bricht es dann mit einer Fehlermeldung ab. Bereits
+laufende Prozesse bleiben erhalten.
 
 Die Proxy-Ziele gelten nur für diesen Start. Bestehende `.env`-Dateien werden
 nicht geändert. `./start.sh` startet weiterhin die echten Services.

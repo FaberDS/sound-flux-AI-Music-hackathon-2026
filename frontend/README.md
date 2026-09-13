@@ -5,8 +5,10 @@ Ein Musikraum mit React, TypeScript, Vite und Tailwind CSS. Die Gestaltung über
 ## Starten
 
 Für Frontend-Arbeit ohne Sprach- und Musikmodelle im Repository-Root
-`./start-dev.sh` ausführen. Das startet das Frontend auf Port 5173 und
-`backend-mockup` auf Port 8001. Die [Mock-Steuerung](http://127.0.0.1:8001/?frontendPort=5173)
+`./start-dev.sh` ausführen. Im Terminal kannst du die Ports für Frontend und
+`backend-mockup` eingeben; Enter übernimmt 5173 und 8001. Belegte Ports fragt
+das Skript erneut ab und verbindet beide Dienste über die gewählten Ports.
+Die [Mock-Steuerung](http://127.0.0.1:8001/?frontendPort=5173) unter dem Standardport
 bietet Beispieldaten, leeres Onboarding, Transkripte, Wartezeiten und Fehlerfälle.
 Frontend-Änderungen lädt Vite sofort; der Mock bleibt dabei aktiv.
 Siehe [Mock-Anleitung und Testabläufe](../backend-mockup/README.md).

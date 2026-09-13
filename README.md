@@ -35,8 +35,10 @@ For frontend development without loading any models, run:
 ./start-dev.sh
 ```
 
-This starts the frontend on [localhost:5173](http://localhost:5173) and a small
-mock for both backend services. Open the [mock controls](http://127.0.0.1:8001/?frontendPort=5173)
+The script asks for frontend and mock ports in the terminal. Press Enter to use
+5173 and 8001; occupied ports can be replaced at the prompt. It connects the
+frontend to the selected mock port automatically. With the defaults, open the
+frontend on [localhost:5173](http://localhost:5173) and the [mock controls](http://127.0.0.1:8001/?frontendPort=5173)
 to load example profiles and songs, restart onboarding, or simulate delays and
 errors. Only Node.js 22.12 or newer and npm are needed; mock data persists separately.
 See [backend-mockup/README.md](backend-mockup/README.md) for the test flows and

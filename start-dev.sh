@@ -3,8 +3,8 @@
 set -eo pipefail
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-MOCK_PORT="${MOCK_PORT:-8001}"
+FRONTEND_PORT="${FRONTEND_PORT:-}"
+MOCK_PORT="${MOCK_PORT:-}"
 service_pids=()
 service_names=()
 set -m
@@ -36,25 +36,57 @@ if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number
   exit 1
 fi
 
-# Never reuse a frontend whose proxy may still point at the real services.
-node --input-type=module - "$FRONTEND_PORT" "$MOCK_PORT" <<'NODE'
+# Prompts go to stderr so command substitution captures only the chosen port.
+# Explicit environment values and starts without a terminal also work for tests.
+select_port() {
+  local name="$1" configured="$2" default_port="$3" other_port="${4:-}"
+  local candidate="${configured:-$default_port}" entered prompt=0
+  if [ -t 0 ] && [ -z "$configured" ]; then
+    prompt=1
+  fi
+  while true; do
+    if [ "$prompt" -eq 1 ]; then
+      if ! read -r -p "$name-Port [$default_port]: " entered; then
+        printf '\nPortauswahl abgebrochen.\n' >&2
+        return 1
+      fi
+      candidate="${entered:-$default_port}"
+    fi
+    # Never reuse a frontend whose proxy may still point at the real services.
+    if node --input-type=module - "$candidate" "$other_port" <<'NODE'
 import net from 'node:net'
-const ports = process.argv.slice(2)
-if (ports.some((port) => !/^\d{1,5}$/.test(port) || +port < 1 || +port > 65535) || +ports[0] === +ports[1]) {
-  console.error('FRONTEND_PORT und MOCK_PORT müssen verschiedene Ports zwischen 1 und 65535 sein.')
+const [port, otherPort] = process.argv.slice(2)
+if (!/^\d{1,5}$/.test(port) || +port < 1 || +port > 65535) {
+  console.error('Bitte einen Port zwischen 1 und 65535 eingeben.')
   process.exit(1)
 }
-for (const port of ports) {
-  const server = net.createServer()
-  try {
-    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(+port, '127.0.0.1', resolve) })
-    await new Promise((resolve) => server.close(resolve))
-  } catch (error) {
-    console.error(`Port ${port} ist nicht verfügbar: ${error.code}. Wähle z. B. FRONTEND_PORT=5174 MOCK_PORT=8002 ./start-dev.sh`)
-    process.exit(1)
-  }
+if (+port === +otherPort) {
+  console.error('Frontend und Mock-Backend brauchen verschiedene Ports.')
+  process.exit(1)
+}
+const server = net.createServer()
+try {
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(+port, '127.0.0.1', resolve) })
+  await new Promise((resolve) => server.close(resolve))
+  process.stdout.write(String(Number(port)))
+} catch (error) {
+  console.error(`Port ${port} ist nicht verfügbar: ${error.code}. Bitte einen anderen Port wählen.`)
+  process.exit(1)
 }
 NODE
+    then
+      return 0
+    fi
+    if [ ! -t 0 ]; then
+      printf 'Ports vorgeben, z. B.: FRONTEND_PORT=5174 MOCK_PORT=8002 ./start-dev.sh\n' >&2
+      return 1
+    fi
+    prompt=1
+  done
+}
+
+FRONTEND_PORT="$(select_port 'Frontend' "$FRONTEND_PORT" 5173)"
+MOCK_PORT="$(select_port 'Mock-Backend' "$MOCK_PORT" 8001 "$FRONTEND_PORT")"
 
 if ! (cd -- "$PROJECT_ROOT/frontend" && npm ls --depth=0 >/dev/null 2>&1); then
   (cd -- "$PROJECT_ROOT/frontend" && npm ci)
