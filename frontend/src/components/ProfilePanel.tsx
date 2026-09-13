@@ -82,8 +82,8 @@ export function ProfilePanel({
   return (
     <>
       <p className="dialog-intro">
-        Here you can see what Sound Flux knows about this person. You can add
-        or correct details. Every field is optional.
+        Add or update personal details to help Sound Flux choose music.
+        Every field is optional.
       </p>
       {saved.loading && (
         <p className="saved-note" role="status">
@@ -110,7 +110,7 @@ export function ProfilePanel({
                 <span className="profile-field-heading">
                   {question}
                   {values[key] && (
-                    <Check size={15} aria-label={`${label} gespeichert`} />
+                    <Check size={15} aria-label={`${label} saved`} />
                   )}
                 </span>
                 {key === 'music_preferences' ? (
@@ -157,7 +157,7 @@ export function ProfilePanel({
         </fieldset>
         <p className="dialog-note">
           <ShieldCheck size={19} />
-          Details and conversations are stored locally on this Mac and used in
+          Details and conversations are stored locally on this device and used in
           later conversations.
         </p>
       </form>
@@ -199,8 +199,8 @@ export function ProfilePanel({
           >
             <p>
               {confirmation === 'all'
-                ? 'Permanently delete all conversations and personal details from this Mac?'
-                : 'Permanently delete all saved conversations from this Mac? Personal details will remain.'}
+                ? 'Permanently delete all conversations and personal details from this device?'
+                : 'Permanently delete all saved conversations from this device? Personal details will remain.'}
             </p>
             <div className="flex flex-wrap gap-2">
               <button

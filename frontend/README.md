@@ -1,6 +1,6 @@
 # Sound Flux Frontend
 
-Ein Musikraum mit React, TypeScript, Vite und Tailwind CSS. Die Gestaltung übernimmt Braun, Gelb, Orange und die kräftige, schmale Überschrift aus der Präsentationsvorlage. Die Oberfläche ist auf Deutsch, passt sich an Handy und Tablet an und lädt Schriften lokal aus dem Build.
+Ein Musikraum mit React, TypeScript, Vite und Tailwind CSS. Die Gestaltung übernimmt Braun, Gelb, Orange und das Schallplattenmotiv der Marke. Die englische Oberfläche nutzt gut lesbare DM Sans und Lora, große beschriftete Bedienelemente und klare Kontraste. Sie passt sich an Handy und Tablet an und lädt Schriften lokal aus dem Build.
 
 ## Starten
 
@@ -86,7 +86,9 @@ npx playwright install chromium
 npm test
 ```
 
-Die Browsertests prüfen Offline-Musik, Profiländerungen und Teilfehler, Verlauf nach Neuladen, beide Löschoptionen, Mikrofonaufnahme mit einem simulierten Audiogerät, automatische Sprechpausen und erneutes Zuhören nach der Antwort. Sie prüfen außerdem den gemeinsamen Turn-Identifier, API-Fehler, Abbrüche, SSE-Chunk-Grenzen und das mobile Layout. API-Antworten werden in den Tests simuliert. Ein erfolgreicher Test bestätigt nicht die Funktionsfähigkeit der lokal installierten ML-Modelle.
+Die Tests in `tests/accessibility.spec.ts` prüfen Startseite, Hilfe, Profil und Songübersicht bei 320, 390, 800 und 1440 Pixeln mit axe. Dazu kommen Tastaturbedienung, 200 Prozent Textgröße, reduzierte Bewegung und große Klickflächen. Die Player-Tests prüfen zusätzlich den Fokus im aktiven Musikraum und die Barrierefreiheit der Kameraabfrage und Wiedergabesteuerung. Automatische Prüfungen ersetzen keinen Test mit den Menschen, die die Oberfläche verwenden.
+
+Die übrigen Browsertests prüfen Offline-Musik, Profiländerungen und Teilfehler, Verlauf nach Neuladen, beide Löschoptionen, Mikrofonaufnahme mit einem simulierten Audiogerät, automatische Sprechpausen und erneutes Zuhören nach der Antwort. Sie prüfen außerdem den gemeinsamen Turn-Identifier, API-Fehler, Abbrüche, SSE-Chunk-Grenzen und das mobile Layout. API-Antworten werden in den Tests simuliert. Ein erfolgreicher Test bestätigt nicht die Funktionsfähigkeit der lokal installierten ML-Modelle.
 
 `npm run build` erzeugt `dist/`. Für ein Deployment muss der Webserver `/api/*` an die Python-API weiterleiten und dabei den Präfix `/api` entfernen. SSE-Buffering ausschalten und lange Modellantworten bei Proxy-Timeouts berücksichtigen. Alternativ lässt sich `VITE_API_BASE_URL` vor dem Build auf eine andere URL setzen; bei einer anderen Origin braucht das Backend passende CORS-Freigaben.
 

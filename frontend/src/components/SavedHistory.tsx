@@ -23,9 +23,10 @@ export function SavedHistory({
         </span>
       </summary>
       <div className="history-tools">
-        <p>Conversations are saved on this Mac.</p>
+        <p>Conversations are saved on this device.</p>
         <button onClick={onRefresh} aria-label="Refresh conversation history">
-          <RefreshCw size={16} />
+          <RefreshCw size={20} />
+          <span>Refresh</span>
         </button>
       </div>
       {loading && (
@@ -35,7 +36,7 @@ export function SavedHistory({
       )}
       {error && (
         <p className="saved-note" role="status">
-          {error} Du kannst den Verlauf erneut laden.
+          {error} Try refreshing your conversation history.
         </p>
       )}
       {!loading && !error && turns.length === 0 && (

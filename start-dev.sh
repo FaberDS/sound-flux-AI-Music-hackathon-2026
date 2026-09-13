@@ -39,7 +39,7 @@ fi
 # Prompts go to stderr so command substitution captures only the chosen port.
 # Explicit environment values and starts without a terminal also work for tests.
 select_port() {
-  local name="$1" configured="$2" default_port="$3" other_port="${4:-}"
+  local name="$1" configured="$2" default_port="$3" other_port="${4:-}" bind_host="${5:-127.0.0.1}"
   local candidate="${configured:-$default_port}" entered prompt=0
   if [ -t 0 ] && [ -z "$configured" ]; then
     prompt=1
@@ -53,9 +53,9 @@ select_port() {
       candidate="${entered:-$default_port}"
     fi
     # Never reuse a frontend whose proxy may still point at the real services.
-    if node --input-type=module - "$candidate" "$other_port" <<'NODE'
+    if node --input-type=module - "$candidate" "$other_port" "$bind_host" <<'NODE'
 import net from 'node:net'
-const [port, otherPort] = process.argv.slice(2)
+const [port, otherPort, bindHost] = process.argv.slice(2)
 if (!/^\d{1,5}$/.test(port) || +port < 1 || +port > 65535) {
   console.error('Bitte einen Port zwischen 1 und 65535 eingeben.')
   process.exit(1)
@@ -66,7 +66,7 @@ if (+port === +otherPort) {
 }
 const server = net.createServer()
 try {
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(+port, '127.0.0.1', resolve) })
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(+port, bindHost, resolve) })
   await new Promise((resolve) => server.close(resolve))
   process.stdout.write(String(Number(port)))
 } catch (error) {
@@ -85,7 +85,7 @@ NODE
   done
 }
 
-FRONTEND_PORT="$(select_port 'Frontend' "$FRONTEND_PORT" 5173)"
+FRONTEND_PORT="$(select_port 'Frontend' "$FRONTEND_PORT" 5173 '' '0.0.0.0')"
 MOCK_PORT="$(select_port 'Mock-Backend' "$MOCK_PORT" 8001 "$FRONTEND_PORT")"
 
 if ! (cd -- "$PROJECT_ROOT/frontend" && npm ls --depth=0 >/dev/null 2>&1); then
@@ -108,11 +108,12 @@ start_service() {
 }
 
 start_service 'Mock-Backend' 'backend-mockup' env MOCK_PORT="$MOCK_PORT" node server.mjs
+# Das Frontend ist so auch über Tailscale erreichbar; API-Aufrufe laufen über den Vite-Proxy.
 start_service 'Frontend' 'frontend' env \
   API_TARGET="http://127.0.0.1:$MOCK_PORT" \
   AUDIO_ENGINE_TARGET="http://127.0.0.1:$MOCK_PORT" \
   VITE_API_BASE_URL=/api \
-  npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort
+  npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT" --strictPort
 
 ready=0
 for (( attempt = 0; attempt < 30; attempt++ )); do

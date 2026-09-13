@@ -14,9 +14,9 @@ export function ChordcatRhythm({
       <div className="rhythm-card">
         <div className="rhythm-intro">
           <p>Optional music board</p>
-          <h2 id="rhythm-title">FIND YOUR RHYTHM</h2>
+          <h2 id="rhythm-title">Find your rhythm</h2>
           <span>
-            Choose one sound, then tap any key. There are no wrong notes.
+            Have a Chordcat music board? Connect it, choose a sound, and tap any key to play.
           </span>
         </div>
         <div className="rhythm-controls">

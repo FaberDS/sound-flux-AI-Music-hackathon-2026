@@ -53,6 +53,8 @@ import {
 } from './lib/music'
 import { useCompanion, type Phase } from './hooks/useCompanion'
 import SoundFlux from './components/sound-flux/SoundFlux.jsx'
+import BrandLogo from './components/sound-flux/BrandLogo.jsx'
+import { FloatingSessionControls } from './components/FloatingSessionControls'
 import { ChordcatRhythm } from './components/ChordcatRhythm'
 import { MouthBeatbox } from './components/MouthBeatbox'
 import { ProfilePanel } from './components/ProfilePanel'
@@ -185,14 +187,15 @@ function Dialog({
       className={`room-dialog ${fullPage ? 'journey-dialog' : ''}`}
     >
       <div className="dialog-header flex items-start justify-between gap-6">
-        <h2 className="font-display text-4xl font-bold uppercase">{title}</h2>
+        <h2>{title}</h2>
         <button
           onClick={onClose}
-          className="icon-button shrink-0"
+          className="dialog-close shrink-0"
           aria-label="Close"
           disabled={!dismissible}
         >
           <X size={22} />
+          <span>Close</span>
         </button>
       </div>
       {children}
@@ -386,9 +389,46 @@ export default function App({ debug = false }: { debug?: boolean }) {
     compositionMode || companion.playMode || (!saved.profile?.onboarding && busy)
   const history = mergeTurns(saved.history, companion.turns)
   const companionRef = useRef<HTMLElement | null>(null)
+  const previousPage = useRef(page)
 
   useEffect(() => {
-    if (busy) companionRef.current?.focus()
+    document.title = page === 'songs' ? 'Your songs · Sound Flux' : 'Sound Flux · Your music room'
+    if (previousPage.current !== page) {
+      document.getElementById('musikraum')?.focus({ preventScroll: true })
+      previousPage.current = page
+    }
+  }, [page])
+
+  useEffect(() => {
+    const room = companionRef.current
+    if (!busy || !room) return
+    const previousFocus = document.activeElement
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    room.focus()
+    function keepFocusInRoom(event: KeyboardEvent) {
+      if (event.key !== 'Tab' || document.querySelector('dialog[open]')) return
+      const controls = Array.from(document.querySelectorAll<HTMLElement>(
+        '.session-active button:not(:disabled), .session-active input:not(:disabled), .session-active select:not(:disabled), .immediate-stop',
+      )).filter((element) => element.getClientRects().length > 0)
+      const first = controls[0]
+      const last = controls.at(-1)
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === room)) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+    document.addEventListener('keydown', keepFocusInRoom)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', keepFocusInRoom)
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
+      else document.getElementById('musikraum')?.focus({ preventScroll: true })
+    }
   }, [busy])
   useEffect(() => {
     if (compositionMode && !cameraPromptShown.current) {
@@ -693,7 +733,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
   async function removeComposition(composition: SavedComposition) {
-    if (!window.confirm('Delete this song from this Mac? This cannot be undone.')) return
+    if (!window.confirm('Delete this song from this device? This cannot be undone.')) return
     try {
       await deleteComposition(composition.id)
       if (activeCompositionId === composition.id) stopAll()
@@ -704,7 +744,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
     }
   }
   async function removeAllCompositions() {
-    if (!window.confirm('Delete all songs from this Mac? This cannot be undone.')) return
+    if (!window.confirm('Delete all songs from this device? This cannot be undone.')) return
     try {
       await deleteAllCompositions()
       stopAll()
@@ -1034,10 +1074,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#musikraum">
+      <a className="skip-link" href="#musikraum" inert={busy}>
         Skip to music room
       </a>
-      <header className="site-header">
+      <header className="site-header" inert={busy}>
         <a
           href="/"
           aria-label="Sound Flux, music room"
@@ -1047,14 +1087,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
             navigatePage('home')
           }}
         >
-          <span className="brand-icon">
-            <AudioLines size={27} strokeWidth={2.4} />
-          </span>
-          <span>
-            sound flux<span className="brand-dot">.</span>
-          </span>
+          <BrandLogo />
         </a>
         <nav className="desktop-nav" aria-label="Main navigation">
+          <a
+            className="nav-link"
+            href="/songs"
+            aria-current={page === 'songs' ? 'page' : undefined}
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              event.preventDefault()
+              navigatePage('songs')
+            }}
+          >
+            <ListMusic size={21} /> Your songs
+          </a>
           <button className="nav-link" onClick={() => setDialog('help')}>
             How it works
           </button>
@@ -1070,14 +1117,14 @@ export default function App({ debug = false }: { debug?: boolean }) {
         </button>
       </header>
       {page === 'songs' ? (
-        <main id="musikraum" className="main-content songs-page">
+        <main id="musikraum" className="main-content songs-page" tabIndex={-1}>
           <button className="songs-back" onClick={() => navigatePage('home')}>
             <ArrowLeft size={20} /> Back to music
           </button>
           <div className="songs-heading">
             <div>
               <p>Your music library</p>
-              <h1>YOUR SONGS</h1>
+              <h1>Your songs</h1>
               <span>Play the music you created with Sound Flux.</span>
             </div>
             {compositions.length > 0 && (
@@ -1098,7 +1145,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                     aria-label={`Play ${name}`}
                   >
                     <img src={compositionArtwork(composition.id)} alt="" />
-                    <span className="song-play-icon"><Play size={24} fill="currentColor" /></span>
+                    <span className="song-play-icon"><Play size={24} fill="currentColor" /> Play song</span>
                   </button>
                   <div className="song-details">
                     <div>
@@ -1127,12 +1174,13 @@ export default function App({ debug = false }: { debug?: boolean }) {
           )}
         </main>
       ) : (
-      <main id="musikraum" className="main-content">
+      <main id="musikraum" className="main-content" tabIndex={-1}>
         <section className="hero-grid" aria-labelledby="page-title">
-          <div className="hero-copy">
-            <h1 id="page-title">MAKE MUSIC.</h1>
+          <div className="hero-copy" inert={busy}>
+            <p className="hero-eyebrow"><Music2 size={22} /> Your personal music room</p>
+            <h1 id="page-title">Make music.<br /><span>At your pace.</span></h1>
             <p className="hero-description">
-              Choose a sound or talk with Sound Flux.
+              Enjoy a familiar sound. Try an instrument.<br className="hero-line-break" /> Or make a song together with Sound Flux.
             </p>
             <fieldset className="mood-selection">
               <legend>Choose a sound</legend>
@@ -1142,7 +1190,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   aria-pressed={mood === 'calm'}
                   className={`mood-button ${mood === 'calm' ? 'selected' : ''}`}
                 >
-                  <Heart size={17} />
+                  <Heart size={22} />
                   Calm{mood === 'calm' && <Check size={18} />}
                 </button>
                 <button
@@ -1150,17 +1198,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   aria-pressed={mood === 'bright'}
                   className={`mood-button ${mood === 'bright' ? 'selected' : ''}`}
                 >
-                  <Music2 size={17} />
+                  <Music2 size={22} />
                   Bright{mood === 'bright' && <Check size={18} />}
                 </button>
               </div>
             </fieldset>
-            {compositions.length > 0 && (
-              <button className="songs-link-button" onClick={() => navigatePage('songs')}>
-                <ListMusic size={21} /> Your songs
-                <span>{compositions.length}</span>
-              </button>
-            )}
             <button
               className="music-button"
               onClick={() => void toggleMusic()}
@@ -1172,6 +1214,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
               )}
               {playing ? 'Pause music' : 'Start music'}
             </button>
+            <p className="hero-hint">You can pause or stop whenever you like.</p>
             {musicError && (
               <p className="error-message" role="alert">
                 {musicError}
@@ -1182,22 +1225,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
             ref={companionRef}
             className={`companion-card ${busy ? 'session-active' : ''} ${compositionMode ? 'composition-mode' : ''} ${focusedComposition ? 'focus-mode' : ''}`}
             aria-label="Voice companion"
+            role={busy ? 'dialog' : undefined}
+            aria-modal={busy || undefined}
             tabIndex={-1}
           >
-            {!focusedComposition && <div className="connection-row">
-              <button
-                className={`connection-status ${connection}`}
-                onClick={() => void refreshConnection()}
-                title="Check the voice companion connection again"
-                aria-label={`Voice API ${connection === 'online' ? 'available' : connection === 'offline' ? 'offline' : 'being checked'}. Check the connection again`}
-              >
-                <span />
-                {connection === 'checking'
-                  ? 'Connecting …'
-                  : connection === 'online'
-                    ? 'Voice ready'
-                  : 'Voice unavailable'}
-              </button>
+            <div className="companion-content">
+            {compositionMode && !focusedComposition && <div className="connection-row">
               {compositionMode && (
                 <button
                   type="button"
@@ -1479,10 +1512,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 Hear the answer again
               </button>
             )}
-            <p className="companion-footnote">
-              <ShieldCheck size={13} />
-              Saved on this Mac.
-            </p>
             {saved.profile?.onboarding &&
               !onboardingDismissed &&
               !busy &&
@@ -1499,19 +1528,21 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   </div>
                 </div>
               )}
+            </div>
+            {busy && <FloatingSessionControls conversation={!compositionMode} onStop={stopAll} />}
           </section>
         </section>
-        <ChordcatRhythm
-          effects={instruments}
-          chordcat={chordcat}
-        />
+        <div className="room-sections" inert={busy}>
         <section
           id="instrumente"
           className="instruments-section"
           aria-labelledby="instrument-title"
         >
           <div className="section-heading">
-            <h2 id="instrument-title">PLAY AN INSTRUMENT</h2>
+            <div>
+              <h2 id="instrument-title">Play an instrument</h2>
+              <p>Tap an instrument to hear its sound. No experience needed.</p>
+            </div>
           </div>
           <div className="instrument-grid">
             {instruments.map(
@@ -1529,6 +1560,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   </span>
                   <span className="instrument-description">
                     <strong>{instrumentName}</strong>
+                    <span>Tap to play</span>
                   </span>
                   <ArrowRight className="instrument-arrow" size={17} />
                 </button>
@@ -1536,6 +1568,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
             )}
           </div>
         </section>
+        <ChordcatRhythm effects={instruments} chordcat={chordcat} />
         <SavedHistory
           turns={history}
           loading={saved.loading}
@@ -1543,12 +1576,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
           onRefresh={() => void saved.refresh()}
           onManage={openProfile}
         />
-        <div className="session-toolbar">
+        <section className="session-toolbar" aria-labelledby="audio-settings-title">
+          <div className="audio-settings-intro">
+            <h2 id="audio-settings-title">Sound settings</h2>
+            <p>Make yourself comfortable.</p>
+          </div>
           <div className="audio-settings">
             <label className="volume-control">
               {volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
               <span>Volume</span>
               <input
+                aria-label="Volume"
+                aria-valuetext={`${Math.round(volume * 100)} percent`}
                 type="range"
                 min="0"
                 max="1"
@@ -1556,6 +1595,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
                 value={volume}
                 onChange={(event) => setVolume(Number(event.target.value))}
               />
+              <output aria-hidden="true">{Math.round(volume * 100)}%</output>
             </label>
             <button
               className="read-aloud"
@@ -1565,26 +1605,18 @@ export default function App({ debug = false }: { debug?: boolean }) {
               <span className={`toggle-track ${readAloud ? 'on' : ''}`}>
                 <span />
               </span>
-              Read answers aloud
+              <span>Read answers aloud <span className="toggle-state">{readAloud ? 'On' : 'Off'}</span></span>
             </button>
             <button className="stop-all" onClick={stopAll}>
               <Square size={12} fill="currentColor" />
               Stop everything
             </button>
           </div>
+        </section>
         </div>
       </main>
       )}
-      {(playing || busy) && (
-        <button
-          className="immediate-stop"
-          onClick={stopAll}
-          aria-label="Stop everything immediately"
-        >
-          <Square size={15} fill="currentColor" />
-          Stop
-        </button>
-      )}
+      {playing && !busy && <FloatingSessionControls conversation={false} onStop={stopAll} />}
       <Dialog
         open={cameraPromptOpen}
         onClose={() => setCameraPromptOpen(false)}
@@ -1622,7 +1654,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
           </span>
           <p>
             Use the camera for mouth sounds or connect your Chordcat music
-            board. Camera video is processed on this Mac and never recorded.
+            board. Camera video is processed on this device and never recorded.
           </p>
         </div>
         <div className="camera-alert-actions">
@@ -1659,11 +1691,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
         fullPage
       >
         <div className="journey-intro">
-          <p>Your musical journey</p>
-          <h3>From your story to your sound.</h3>
+          <p>Make music with Sound Flux</p>
+          <h3>A song that starts with you.</h3>
           <span>
-            Sound Flux listens first, then turns the moments that matter to you
-            into music you can shape together.
+            Talk about music you enjoy, share a memory, or hum a tune.
+            Sound Flux helps you turn it into your own song.
           </span>
         </div>
         <ol className="journey-steps">
@@ -1678,11 +1710,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
               </span>
             </div>
             <div className="journey-copy">
-              <span>01 · Listen</span>
-              <h4>We get to know you</h4>
+              <span>Step 1 · Talk</span>
+              <h4>Tell us what you like</h4>
               <p>
-                A gentle conversation helps us understand your favorite music,
-                moods, and what feels comfortable today.
+                Tap “Talk with Sound Flux” and tell us about your favorite music.
+                Take as much time as you need.
               </p>
             </div>
           </li>
@@ -1693,11 +1725,11 @@ export default function App({ debug = false }: { debug?: boolean }) {
               <span className="memory-card memory-two"><Music2 size={27} /></span>
             </div>
             <div className="journey-copy">
-              <span>02 · Remember</span>
-              <h4>We revisit meaningful moments</h4>
+              <span>Step 2 · Remember</span>
+              <h4>Share a memory</h4>
               <p>
-                Together, we remember people, places, and experiences that bring
-                warmth, joy, or calm.
+                You can talk about a person, a place, or a song you remember.
+                Share only what you want to.
               </p>
             </div>
           </li>
@@ -1709,29 +1741,29 @@ export default function App({ debug = false }: { debug?: boolean }) {
               <span className="sound-chip sound-drum"><Drum size={21} /></span>
             </div>
             <div className="journey-copy">
-              <span>03 · Create</span>
-              <h4>We make music together</h4>
+              <span>Step 3 · Play</span>
+              <h4>Make it your own</h4>
               <p>
-                Your stories guide a personal sound. Listen, hum, or add an
-                instrument—there is no wrong way to join in.
+                Hum a tune when Sound Flux asks, then listen to your song.
+                You can add instrument sounds or simply enjoy the music.
               </p>
             </div>
           </li>
         </ol>
         <div className="journey-finish">
-          <p><ShieldCheck size={16} /> Private, unhurried, and always at your pace.</p>
+          <p><ShieldCheck size={16} /> You can stop the conversation at any time.</p>
           <button className="dialog-primary" onClick={() => {
             setDialog(null)
             onMicrophone()
           }}>
-            Start your musical journey <ArrowRight size={18} />
+            Talk with Sound Flux <ArrowRight size={18} />
           </button>
         </div>
       </Dialog>
       <Dialog
         open={dialog === 'profile'}
         onClose={() => setDialog(null)}
-        title="Experience music together"
+        title="For companions"
         dismissible={!saved.busy}
       >
         {dialog === 'profile' && (
