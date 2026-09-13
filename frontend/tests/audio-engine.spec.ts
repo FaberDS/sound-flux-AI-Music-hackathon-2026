@@ -300,18 +300,6 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   await page.getByRole('button', { name: /Delete Composition/ }).last().click()
   await expect(page.locator('.song-card')).toHaveCount(1)
   await page.getByRole('button', { name: /Play Composition/ }).first().click()
-  const cameraAlert = page.getByRole('alertdialog', {
-    name: 'Ready to start playing?',
-  })
-  await expect(cameraAlert).toBeVisible()
-  await expect(cameraAlert.locator('.mouth-sound-pictogram')).toBeVisible()
-  await expect(cameraAlert.getByRole('button', { name: 'Use camera' }))
-    .toHaveAttribute('aria-pressed', 'true')
-  await expect(cameraAlert.getByRole('button', { name: 'Use Chordcat' }))
-    .toHaveAttribute('aria-pressed', 'true')
-  await expect(page.locator('.focus-play')).toContainText('Play music')
-  expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()).violations).toEqual([])
-  await cameraAlert.getByRole('button', { name: 'Start playing' }).click()
   const player = page.getByRole('dialog', { name: 'Voice companion' })
   await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
   await player.getByRole('button', { name: 'Show all' }).click()
@@ -362,7 +350,6 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   await page.reload()
   await page.getByRole('link', { name: /Your songs/ }).click()
   await page.getByRole('button', { name: /Play Composition/ }).first().click()
-  await cameraAlert.getByRole('button', { name: 'Not now' }).click()
   await page.getByRole('button', { name: 'Show all' }).click()
   await expect(
     page.getByRole('slider', { name: 'Generated music volume' }),
@@ -419,8 +406,9 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
     page.getByRole('dialog', { name: 'Voice companion' })
       .getByRole('button', { name: 'Pause music' }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Enable camera' }).click()
+  await expect(page.getByRole('button', { name: 'Turn camera off' })).toBeVisible()
   await expect(player.locator('.mouth-camera')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Turn camera off' }).click()
   await page.getByRole('button', { name: 'Focus mode' }).click()
   const focusInstrument = player.getByLabel('Current instrument: Drum')
   await expect(focusInstrument).toBeVisible()
@@ -433,7 +421,7 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
   expect(focusInstrumentBox.y + focusInstrumentBox.height)
     .toBeLessThan(focusArtworkBox.y)
   await expect(player.getByLabel('Effect', { exact: true })).toBeHidden()
-  await expect(player.locator('.mouth-camera')).toHaveCount(1)
+  await expect(player.locator('.mouth-camera')).toHaveCount(0)
   await page.getByRole('button', { name: 'Back to home' }).click()
   await expect(page).toHaveURL(/\/$/)
   await page.getByRole('link', { name: /Your songs/ }).click()
@@ -582,10 +570,13 @@ test('prepares music, then records the hum before composing', async ({ page }) =
   await expect(
     page.getByRole('dialog', { name: 'Voice companion' }),
   ).toHaveClass(/session-active/)
-  await expect.poll(() => uploads).toBe(1)
+  await expect(page.locator('.composer-overlay')).toBeVisible()
+  const composingAt = Date.now()
+  await page.waitForTimeout(3_500)
+  expect(uploads).toBe(0)
+  await expect.poll(() => uploads, { timeout: 2_000 }).toBe(1)
+  expect(Date.now() - composingAt).toBeGreaterThanOrEqual(3_500)
   expect(body).toContain('name="audio"')
-  await page.getByRole('alertdialog', { name: 'Ready to start playing?' })
-    .getByRole('button', { name: 'Not now' }).click()
   const player = page.getByRole('dialog', { name: 'Voice companion' })
   await expect(player.getByRole('button', { name: 'Pause music' })).toBeVisible()
   await expect(player.getByRole('img', { name: 'Artwork for your saved composition' }))

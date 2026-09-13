@@ -1926,9 +1926,6 @@
     color: var(--color-brown);
     font-weight: 700;
   }
-  .camera-alert-start {
-    grid-column: 1 / -1;
-  }
   .profile-form {
     display: grid;
     gap: 18px;

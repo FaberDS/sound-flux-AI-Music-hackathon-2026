@@ -10,5 +10,5 @@
   "input_mix": 0.95,
   "match_input": true,
   "use_default": true,
-  "default_file": "default_no_humming.wav"
+  "default_file": "default_sound.wav"
 }

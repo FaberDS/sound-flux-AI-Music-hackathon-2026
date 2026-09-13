@@ -337,13 +337,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [autoReplay, setAutoReplay] = useState(true)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
   const [cameraEnabled, setCameraEnabled] = useState(false)
-  const [cameraPromptOpen, setCameraPromptOpen] = useState(false)
-  const [cameraSelected, setCameraSelected] = useState(true)
-  const [chordcatSelected, setChordcatSelected] = useState(true)
-  const [startingPlayback, setStartingPlayback] = useState(false)
-  const [pendingPlayback, setPendingPlayback] = useState<
-    SavedComposition | 'generated' | null
-  >(null)
   const [completionPromptOpen, setCompletionPromptOpen] = useState(false)
   const [volume, setVolume] = useState(0.45)
   const [layerVolumes, setLayerVolumes] = useState(savedLayerVolumes)
@@ -381,6 +374,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const healthRequest = useRef<AbortController | null>(null)
   const compositionsRequest = useRef<AbortController | null>(null)
   const handledMusicRequest = useRef(0)
+  const enableChordcat = useRef<() => void>(() => {})
   const saved = useSavedData()
   const refreshSaved = saved.refresh
   const requestMusic = useCallback(() => setMusicRequest((value) => value + 1), [])
@@ -578,12 +572,10 @@ export default function App({ debug = false }: { debug?: boolean }) {
       void music.captureAndCompose(setCapturePhase, (identifier) => {
         setFocusMode(true)
         setActiveCompositionId(identifier)
-        setCameraSelected(true)
-        setChordcatSelected(true)
-        setPendingPlayback('generated')
-        setCameraPromptOpen(true)
+        setCameraEnabled(true)
+        enableChordcat.current()
         void refreshCompositions()
-      }, false).then(
+      }, 4_000).then(
         (isPlaying) => {
           if (active) {
             setCapturePhase('idle')
@@ -671,6 +663,9 @@ export default function App({ debug = false }: { debug?: boolean }) {
     savesToSong: compositionMode && playing,
     onPlay: playRhythm,
   })
+  enableChordcat.current = () => {
+    if (!chordcat.connected) void chordcat.connect()
+  }
   const CameraActionIcon = cameraAction
     ? instruments.find(({ id }) => id === cameraAction.effect)?.icon ?? Drum
     : Drum
@@ -695,8 +690,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const stopAll = () => {
     music.stop()
     setCameraEnabled(false)
-    setCameraPromptOpen(false)
-    setPendingPlayback(null)
     setCapturePhase('idle')
     setPlaying(false)
     setFocusMode(true)
@@ -734,10 +727,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
     if (playing) {
       music.stop()
       setPlaying(false)
-      return
-    }
-    if (pendingPlayback) {
-      setCameraPromptOpen(true)
       return
     }
     try {
@@ -785,43 +774,24 @@ export default function App({ debug = false }: { debug?: boolean }) {
       )
     }
   }
-  function playSavedComposition(composition: SavedComposition) {
+  async function playSavedComposition(composition: SavedComposition) {
     music.stop()
     setPlaying(false)
     void companion.stop()
     setFocusMode(true)
     setActiveCompositionId(composition.id)
-    setCameraSelected(true)
-    setChordcatSelected(true)
-    setPendingPlayback(composition)
-    setCameraPromptOpen(true)
+    setCameraEnabled(true)
+    if (!chordcat.connected) void chordcat.connect()
     navigatePage('home')
-  }
-  async function startPendingPlayback(useSelectedDevices = true) {
-    const pending = pendingPlayback
-    if (!pending) return
-    setStartingPlayback(true)
-    const useCamera = useSelectedDevices && cameraSelected
-    const useChordcat = useSelectedDevices && chordcatSelected
-    setCameraEnabled(useCamera)
-    if (useChordcat && !chordcat.connected) await chordcat.connect()
-    else if (!useChordcat && chordcat.connected) chordcat.disconnect()
     try {
-      const started = pending === 'generated'
-        ? music.startPreparedComposition()
-        : await music.playComposition(
-            pending.url,
-            pending.effects.length ? pending.effectsUrl : undefined,
-          )
-      if (!started) throw new Error('No composition is ready.')
-      setPlaying(true)
+      setPlaying(Boolean(await music.playComposition(
+        composition.url,
+        composition.effects.length ? composition.effectsUrl : undefined,
+      )))
       setMusicError('')
     } catch {
+      setActiveCompositionId(null)
       setMusicError('The saved composition could not be played.')
-    } finally {
-      setPendingPlayback(null)
-      setCameraPromptOpen(false)
-      setStartingPlayback(false)
     }
   }
   async function continueComposition() {
@@ -1781,96 +1751,6 @@ export default function App({ debug = false }: { debug?: boolean }) {
             onClick={() => void continueComposition()}
           >
             <Music2 size={20} /> Keep making music
-          </button>
-        </div>
-      </Dialog>
-      <Dialog
-        open={cameraPromptOpen}
-        onClose={() => setCameraPromptOpen(false)}
-        title="Ready to start playing?"
-        dismissible={!startingPlayback}
-        alert
-      >
-        <div className="camera-alert-copy">
-          <span aria-hidden="true">
-            <svg
-              className="mouth-sound-pictogram"
-              viewBox="0 0 64 64"
-              width="42"
-              height="42"
-              fill="none"
-            >
-              <path
-                d="M5 31c6-8 12-11 19-7 7-4 13-1 19 7-6 8-12 11-19 11S11 39 5 31Z"
-                stroke="currentColor"
-                strokeWidth="3.5"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M9 31c10 3 20 3 30 0"
-                stroke="currentColor"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-              />
-              <path
-                d="M48 26c3 3 3 9 0 12M55 20c7 7 7 17 0 24"
-                stroke="currentColor"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-              />
-            </svg>
-          </span>
-          <p>
-            Camera and Chordcat controls are ready to turn on. Camera video is
-            processed on this device and never recorded.
-          </p>
-        </div>
-        <div className="camera-alert-actions">
-          <button
-            type="button"
-            className={`camera-permission ${cameraSelected ? 'online' : ''}`}
-            aria-label="Use camera"
-            aria-pressed={cameraSelected}
-            onClick={() => setCameraSelected(!cameraSelected)}
-            disabled={startingPlayback}
-          >
-            {cameraSelected ? <Camera size={20} /> : <CameraOff size={20} />}
-            <span className="camera-copy">
-              <strong>Camera</strong>
-              <span>{cameraSelected ? 'On when music starts' : 'Off'}</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            className={`camera-permission chordcat-permission ${chordcatSelected ? 'online' : ''}`}
-            aria-label="Use Chordcat"
-            aria-pressed={chordcatSelected}
-            onClick={() => setChordcatSelected(!chordcatSelected)}
-            disabled={startingPlayback}
-          >
-            {chordcatSelected ? <Cable size={20} /> : <X size={20} />}
-            <span className="camera-copy">
-              <strong>Chordcat</strong>
-              <span>{chordcatSelected ? 'Connect when music starts' : 'Off'}</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            className="dialog-primary camera-alert-start"
-            onClick={() => void startPendingPlayback()}
-            disabled={startingPlayback}
-          >
-            {startingPlayback
-              ? <LoaderCircle className="animate-spin" size={20} />
-              : <Play size={20} fill="currentColor" />}
-            {startingPlayback ? 'Starting…' : 'Start playing'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void startPendingPlayback(false)}
-            disabled={startingPlayback}
-          >
-            Not now
           </button>
         </div>
       </Dialog>
