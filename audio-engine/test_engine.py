@@ -326,26 +326,46 @@ class InterfaceTests(unittest.TestCase):
                 self.assertEqual(self.client.get("/api/samples").json(), ["a.wav", "b.m4a"])
         self.assertEqual(self.client.get("/samples/../app.py").status_code, 404)
 
-    def test_mouth_beat_is_mixed_into_saved_composition(self):
+    def test_mouth_effects_are_mixed_and_removable(self):
         from app import COMPOSITIONS, composition_path
         identifier = "20260913T123456123456Z-42"
         COMPOSITIONS.mkdir()
         sf.write(composition_path(identifier), np.zeros((16000, 2)), 8000, subtype="PCM_16")
 
-        response = self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 0.5})
+        response = self.client.post(
+            f"/api/compositions/{identifier}/effects",
+            json={"at": 0.5, "effect": "drum", "intensity": 1, "pitch": "low"},
+        )
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json(), {"duration": 2.0, "beats": [0.5]})
+        first = response.json()["effects"][0]
+        self.assertEqual({key: first[key] for key in ("at", "effect", "intensity", "pitch")}, {
+            "at": 0.5, "effect": "drum", "intensity": 1.0, "pitch": "low",
+        })
         mixed, _ = sf.read(composition_path(identifier))
         self.assertGreater(np.max(np.abs(mixed[4000:7200])), 0.1)
-        response = self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 1.9})
-        self.assertEqual(response.json()["beats"], [0.5, 1.9])
+        response = self.client.post(
+            f"/api/compositions/{identifier}/effects",
+            json={"at": 1.9, "effect": "guitar", "intensity": 0.4, "pitch": "high"},
+        )
+        effects = response.json()["effects"]
+        self.assertEqual([effect["effect"] for effect in effects], ["drum", "guitar"])
         mixed, _ = sf.read(composition_path(identifier))
         self.assertGreater(np.max(np.abs(mixed[:2400])), 0.01)
         library = self.client.get("/api/compositions").json()
-        self.assertEqual((library[0]["duration"], library[0]["beats"]), (2.0, [0.5, 1.9]))
+        self.assertEqual((library[0]["duration"], library[0]["effects"]), (2.0, effects))
+        for effect in effects:
+            response = self.client.delete(
+                f"/api/compositions/{identifier}/effects/{effect['id']}",
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+        mixed, _ = sf.read(composition_path(identifier))
+        self.assertEqual(np.max(np.abs(mixed)), 0)
         self.assertEqual(
-            self.client.post(f"/api/compositions/{identifier}/beats", json={"at": 2}).status_code,
+            self.client.post(
+                f"/api/compositions/{identifier}/effects",
+                json={"at": 2, "effect": "drum", "intensity": 1, "pitch": "low"},
+            ).status_code,
             400,
         )
 

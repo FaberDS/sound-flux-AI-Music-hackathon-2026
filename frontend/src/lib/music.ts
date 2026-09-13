@@ -1,13 +1,34 @@
 export type Instrument = 'piano' | 'guitar' | 'bells' | 'drum'
+export type EffectPitch = 'low' | 'high'
 export type Mood = 'calm' | 'bright'
 export type CapturePhase = 'idle' | 'recording' | 'composing'
+
+export interface CompositionEffect {
+  id: string
+  at: number
+  effect: Instrument
+  intensity: number
+  pitch: EffectPitch
+}
 
 export interface SavedComposition {
   id: string
   created_at: string
   url: string
   duration: number
-  beats: number[]
+  effects: CompositionEffect[]
+}
+
+function isCompositionEffect(value: unknown): value is CompositionEffect {
+  if (!value || typeof value !== 'object') return false
+  const effect = value as Partial<CompositionEffect>
+  return (
+    typeof effect.id === 'string' &&
+    typeof effect.at === 'number' &&
+    ['piano', 'guitar', 'bells', 'drum'].includes(effect.effect ?? '') &&
+    typeof effect.intensity === 'number' &&
+    (effect.pitch === 'low' || effect.pitch === 'high')
+  )
 }
 
 export async function getCompositions(signal: AbortSignal) {
@@ -27,25 +48,46 @@ export async function getCompositions(signal: AbortSignal) {
         created_at: item.created_at,
         url: `/engine/api/compositions/${encodeURIComponent(item.id)}`,
         duration: typeof item.duration === 'number' ? item.duration : 0,
-        beats: Array.isArray(item.beats)
-          ? item.beats.filter((beat: unknown): beat is number => typeof beat === 'number')
+        effects: Array.isArray(item.effects)
+          ? item.effects.filter(isCompositionEffect)
           : [],
       })
     return items
   }, [])
 }
 
-export async function saveCompositionBeat(identifier: string, at: number) {
+export async function saveCompositionEffect(
+  identifier: string,
+  effect: Omit<CompositionEffect, 'id'>,
+) {
   const response = await fetch(
-    `/engine/api/compositions/${encodeURIComponent(identifier)}/beats`,
+    `/engine/api/compositions/${encodeURIComponent(identifier)}/effects`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ at }),
+      body: JSON.stringify(effect),
     },
   )
-  if (!response.ok) throw new Error('The mouth beat could not be saved.')
-  return response.json() as Promise<{ duration: number; beats: number[] }>
+  if (!response.ok) throw new Error('The mouth effect could not be saved.')
+  return response.json() as Promise<{
+    duration: number
+    effects: CompositionEffect[]
+  }>
+}
+
+export async function deleteCompositionEffect(
+  identifier: string,
+  effectId: string,
+) {
+  const response = await fetch(
+    `/engine/api/compositions/${encodeURIComponent(identifier)}/effects/${encodeURIComponent(effectId)}`,
+    { method: 'DELETE' },
+  )
+  if (!response.ok) throw new Error('The mouth effect could not be removed.')
+  return response.json() as Promise<{
+    duration: number
+    effects: CompositionEffect[]
+  }>
 }
 
 export class MusicRoom {
@@ -150,7 +192,7 @@ export class MusicRoom {
     )
   }
 
-  beat() {
+  beat(effect: Instrument, intensity: number, pitch: EffectPitch) {
     if (
       !this.context ||
       this.context.state === 'closed' ||
@@ -159,7 +201,8 @@ export class MusicRoom {
       !this.loopDuration
     )
       return null
-    this.note(60, 'drum', 0.4, 0.32)
+    const midi = (pitch === 'high' ? 72 : 60) + (effect === 'bells' ? 12 : 0)
+    this.note(midi, effect, effect === 'drum' ? 0.4 : 1.2, 0.12 + 0.2 * intensity)
     return (this.context.currentTime - this.loopStartedAt) % this.loopDuration
   }
 

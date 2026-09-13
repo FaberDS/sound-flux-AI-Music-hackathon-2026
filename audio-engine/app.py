@@ -4,6 +4,7 @@ import math
 import os
 import re
 import threading
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,16 +107,69 @@ def composition_path(identifier: str):
     return COMPOSITIONS / f"{identifier}.wav"
 
 
-def beat_path(identifier: str):
-    return COMPOSITIONS / f"{identifier}.beats.json"
+def base_composition_path(identifier: str):
+    return COMPOSITIONS / f"{identifier}.base.wav"
 
 
-def composition_beats(identifier: str):
+def effects_path(identifier: str):
+    return COMPOSITIONS / f"{identifier}.effects.json"
+
+
+def composition_effects(identifier: str):
     try:
-        values = json.loads(beat_path(identifier).read_text())
-        return [value for value in values if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0]
+        values = json.loads(effects_path(identifier).read_text())
     except (FileNotFoundError, json.JSONDecodeError, TypeError):
         return []
+    if not isinstance(values, list):
+        return []
+    return [
+        value for value in values
+        if isinstance(value, dict)
+        and isinstance(value.get("id"), str)
+        and isinstance(value.get("at"), (int, float))
+        and not isinstance(value.get("at"), bool)
+        and math.isfinite(value["at"])
+        and value.get("effect") in {"piano", "guitar", "bells", "drum"}
+        and isinstance(value.get("intensity"), (int, float))
+        and not isinstance(value.get("intensity"), bool)
+        and math.isfinite(value["intensity"])
+        and 0.1 <= value["intensity"] <= 1
+        and value.get("pitch") in {"low", "high"}
+    ]
+
+
+def render_composition_effects(identifier: str, effects: list[dict]):
+    path = composition_path(identifier)
+    base = base_composition_path(identifier)
+    if not base.is_file():
+        os.link(path, base)
+    samples, rate = sf.read(base, dtype="float32", always_2d=True)
+    for effect in effects:
+        instrument = effect["effect"]
+        sound_length = 0.4 if instrument == "drum" else 1.2
+        length = round(sound_length * rate)
+        time = np.arange(length, dtype=np.float32) / rate
+        midi = (72 if effect["pitch"] == "high" else 60) + (12 if instrument == "bells" else 0)
+        frequency = 440 * 2 ** ((midi - 69) / 12)
+        phase = (
+            2 * np.pi * (145 * time - 50 / 0.4 * time**2)
+            if instrument == "drum"
+            else 2 * np.pi * frequency * time
+        )
+        wave = (2 / np.pi) * np.arcsin(np.sin(phase)) if instrument == "guitar" else np.sin(phase)
+        if instrument == "bells":
+            wave += 0.18 * np.sin(phase * 2.76)
+        strength = 0.12 + 0.2 * effect["intensity"]
+        envelope = np.minimum(time / 0.012, 1) * np.exp(-7 * time / sound_length) * strength
+        start = round(effect["at"] * rate)
+        samples[(start + np.arange(length)) % len(samples)] += (wave * envelope)[:, None]
+    temporary = path.with_suffix(".partial.wav")
+    sf.write(temporary, np.clip(samples, -0.99, 0.99), rate, format="WAV", subtype="PCM_16")
+    temporary.replace(path)
+    metadata = effects_path(identifier)
+    metadata.with_suffix(".partial.json").write_text(json.dumps(effects))
+    metadata.with_suffix(".partial.json").replace(metadata)
+    return len(samples) / rate
 
 
 def save_composition(rate, samples, seed):
@@ -124,6 +178,7 @@ def save_composition(rate, samples, seed):
     path = composition_path(identifier)
     with path.open("xb") as output:
         sf.write(output, samples, rate, format="WAV", subtype="PCM_16")
+    os.link(path, base_composition_path(identifier))
     return identifier
 
 
@@ -160,7 +215,7 @@ def compositions():
             "created_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "url": f"/api/compositions/{path.stem}",
             "duration": sf.info(path).duration,
-            "beats": composition_beats(path.stem),
+            "effects": composition_effects(path.stem),
         }
         for path in sorted(COMPOSITIONS.glob("*.wav"), key=lambda path: path.stat().st_mtime, reverse=True)
         if re.fullmatch(r"[0-9]{8}T[0-9]{12}Z-[0-9]+", path.stem)
@@ -175,40 +230,62 @@ def composition(identifier: str):
     return FileResponse(path, media_type="audio/wav", filename=path.name)
 
 
-@app.post("/api/compositions/{identifier}/beats")
-async def add_composition_beat(identifier: str, request: Request):
+@app.post("/api/compositions/{identifier}/effects")
+async def add_composition_effect(identifier: str, request: Request):
     try:
         body = await request.json()
         at = body["at"]
-        if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+        intensity = body["intensity"]
+        if (
+            isinstance(at, bool)
+            or not isinstance(at, (int, float))
+            or not math.isfinite(at)
+            or body["effect"] not in {"piano", "guitar", "bells", "drum"}
+            or isinstance(intensity, bool)
+            or not isinstance(intensity, (int, float))
+            or not math.isfinite(intensity)
+            or not 0.1 <= intensity <= 1
+            or body["pitch"] not in {"low", "high"}
+        ):
             raise ValueError
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, "Beat time must be a finite number.") from exc
+        raise HTTPException(400, "Choose a valid effect, intensity, pitch, and timestamp.") from exc
     path = composition_path(identifier)
     if not path.is_file():
         raise HTTPException(404, "Composition not found.")
 
     # ponytail: one local user; use per-composition locks if concurrent editing ever matters.
     with composition_lock:
-        samples, rate = sf.read(path, dtype="float32", always_2d=True)
-        duration = len(samples) / rate
+        duration = sf.info(path).duration
         if not 0 <= at < duration:
-            raise HTTPException(400, "Beat time must be inside the composition.")
-        length = round(0.4 * rate)
-        time = np.arange(length, dtype=np.float32) / rate
-        phase = 2 * np.pi * (145 * time - 50 / 0.4 * time**2)
-        envelope = np.minimum(time / 0.012, 1) * np.exp(-7 * time / 0.4) * 0.32
-        start = round(at * rate)
-        samples[(start + np.arange(length)) % len(samples)] += (np.sin(phase) * envelope)[:, None]
-        samples = np.clip(samples, -0.99, 0.99)
-        temporary = path.with_suffix(".partial.wav")
-        sf.write(temporary, samples, rate, format="WAV", subtype="PCM_16")
-        temporary.replace(path)
-        beats = sorted([*composition_beats(identifier), float(at)])
-        metadata = beat_path(identifier)
-        metadata.with_suffix(".partial.json").write_text(json.dumps(beats))
-        metadata.with_suffix(".partial.json").replace(metadata)
-    return {"duration": duration, "beats": beats}
+            raise HTTPException(400, "Effect time must be inside the composition.")
+        effects = [
+            *composition_effects(identifier),
+            {
+                "id": uuid.uuid4().hex,
+                "at": float(at),
+                "effect": body["effect"],
+                "intensity": float(intensity),
+                "pitch": body["pitch"],
+            },
+        ]
+        effects.sort(key=lambda effect: effect["at"])
+        duration = render_composition_effects(identifier, effects)
+    return {"duration": duration, "effects": effects}
+
+
+@app.delete("/api/compositions/{identifier}/effects/{effect_id}")
+def delete_composition_effect(identifier: str, effect_id: str):
+    path = composition_path(identifier)
+    if not path.is_file():
+        raise HTTPException(404, "Composition not found.")
+    with composition_lock:
+        effects = composition_effects(identifier)
+        remaining = [effect for effect in effects if effect["id"] != effect_id]
+        if len(remaining) == len(effects):
+            raise HTTPException(404, "Effect not found.")
+        duration = render_composition_effects(identifier, remaining)
+    return {"duration": duration, "effects": remaining}
 
 
 @app.post("/api/compose")

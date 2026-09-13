@@ -58,26 +58,54 @@ test('opens a saved composition in the artwork player', async ({ page }) => {
         id: '20260913T123456123456Z-42',
         created_at: '2026-09-13T12:34:56Z',
         duration: 2,
-        beats: [0.5],
+        effects: [{
+          id: 'effect-1',
+          at: 0.5,
+          effect: 'piano',
+          intensity: 0.8,
+          pitch: 'high',
+        }],
       }],
     }),
+  )
+  await page.route('**/engine/api/compositions/*/effects/*', (route) =>
+    route.fulfill({ json: { duration: 2, effects: [] } }),
   )
 
   await page.goto('/')
   await page.getByRole('button', { name: /Play composition from/ }).click()
+  const cameraAlert = page.getByRole('alertdialog', {
+    name: 'Add effects with your mouth?',
+  })
+  await expect(cameraAlert).toBeVisible()
+  await expect(cameraAlert.locator('.mouth-sound-pictogram')).toBeVisible()
+  await cameraAlert.getByRole('button', { name: 'Not now' }).click()
   await expect(
     page.getByRole('heading', { name: 'Your composition is playing' }),
   ).toBeVisible()
   await expect(
     page.getByRole('img', { name: 'Artwork for your saved composition' }),
   ).toBeVisible()
-  await expect(
-    page.getByRole('img', { name: 'Composition timeline with 1 mouth beat' }),
-  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Enable camera' })).toBeVisible()
+  const timeline = page.getByLabel('Composition timeline with 1 mouth effect')
+  await expect(timeline).toBeVisible()
+  await timeline.locator('.timeline-effect').hover()
+  await page.getByRole('button', { name: 'Remove Piano at 0:00' }).click()
+  await expect(page.getByLabel('Composition timeline with 0 mouth effects')).toBeVisible()
+  await expect(page.getByLabel('Effect', { exact: true })).toHaveValue('drum')
+  await expect(page.getByRole('group', { name: 'Pitch' })).toBeVisible()
+  const mouthControls = await page
+    .getByRole('region', { name: 'Mouth beatbox' })
+    .boundingBox()
+  expect(mouthControls).not.toBeNull()
+  expect(mouthControls!.y + mouthControls!.height).toBeLessThanOrEqual(1000)
   await expect(
     page.getByRole('region', { name: 'Voice companion' })
       .getByRole('button', { name: 'Pause music' }),
   ).toBeVisible()
+  await page.getByRole('button', { name: 'Back to your songs' }).click()
+  await page.getByRole('button', { name: /Play composition from/ }).click()
+  await expect(cameraAlert).toHaveCount(0)
 })
 
 test('prepares music, then records the hum before composing', async ({ page }) => {

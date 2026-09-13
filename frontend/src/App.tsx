@@ -9,6 +9,8 @@ import {
   ArrowRight,
   AudioLines,
   BellRing,
+  Camera,
+  CameraOff,
   Check,
   ChevronRight,
   Drum,
@@ -29,10 +31,12 @@ import {
 } from 'lucide-react'
 import { checkConnection, preseedOnboarding } from './lib/api'
 import {
+  deleteCompositionEffect,
   getCompositions,
   MusicRoom,
-  saveCompositionBeat,
+  saveCompositionEffect,
   type CapturePhase,
+  type EffectPitch,
   type Instrument,
   type Mood,
   type SavedComposition,
@@ -118,6 +122,7 @@ function Dialog({
   children,
   dismissible = true,
   fullPage = false,
+  alert = false,
 }: {
   open: boolean
   onClose: () => void
@@ -125,6 +130,7 @@ function Dialog({
   children: ReactNode
   dismissible?: boolean
   fullPage?: boolean
+  alert?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -143,6 +149,7 @@ function Dialog({
         if (dismissible && event.target === ref.current) onClose()
       }}
       aria-label={title}
+      role={alert ? 'alertdialog' : undefined}
       className={`room-dialog ${fullPage ? 'journey-dialog' : ''}`}
     >
       <div className="dialog-header flex items-start justify-between gap-6">
@@ -205,28 +212,45 @@ function AmazingGraceArtwork({
   )
 }
 
-function CompositionTimeline({ composition }: { composition?: SavedComposition }) {
+function CompositionTimeline({
+  composition,
+  onRemove,
+}: {
+  composition?: SavedComposition
+  onRemove: (effectId: string) => void
+}) {
   if (!composition?.duration) return null
   const time = (seconds: number) =>
     `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
   return (
     <div
       className="composition-timeline"
-      role="img"
-      aria-label={`Composition timeline with ${composition.beats.length} mouth ${composition.beats.length === 1 ? 'beat' : 'beats'}`}
+      aria-label={`Composition timeline with ${composition.effects.length} mouth ${composition.effects.length === 1 ? 'effect' : 'effects'}`}
     >
       <span>0:00</span>
-      <div className="timeline-track" aria-hidden="true">
-        {composition.beats.map((beat, index) => (
-          <span
-            key={`${beat}-${index}`}
-            className="timeline-beat"
-            style={{ left: `${Math.max(2, Math.min(98, beat / composition.duration * 100))}%` }}
-            title={`Mouth beat at ${time(beat)}`}
-          >
-            <Drum size={18} />
-          </span>
-        ))}
+      <div className="timeline-track">
+        {composition.effects.map((effect) => {
+          const option = instruments.find(({ id }) => id === effect.effect)
+          const Icon = option?.icon ?? Drum
+          return (
+            <span
+              key={effect.id}
+              className={`timeline-effect instrument-${effect.effect}`}
+              style={{ left: `${Math.max(2, Math.min(98, effect.at / composition.duration * 100))}%` }}
+              title={`${option?.name ?? 'Effect'}, ${effect.pitch} pitch, ${Math.round(effect.intensity * 100)}% intensity at ${time(effect.at)}`}
+            >
+              <Icon size={18} aria-hidden="true" />
+              <button
+                type="button"
+                className="timeline-remove"
+                aria-label={`Remove ${option?.name ?? 'effect'} at ${time(effect.at)}`}
+                onClick={() => onRemove(effect.id)}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )
+        })}
       </div>
       <span>{time(composition.duration)}</span>
     </div>
@@ -237,6 +261,8 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const [mood, setMood] = useState<Mood>('calm')
   const [playing, setPlaying] = useState(false)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
+  const [cameraEnabled, setCameraEnabled] = useState(false)
+  const [cameraPromptOpen, setCameraPromptOpen] = useState(false)
   const [volume, setVolume] = useState(0.45)
   const [readAloud, setReadAloud] = useState(true)
   const [dialog, setDialog] = useState<'help' | 'profile' | null>(null)
@@ -263,6 +289,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
   const healthRequest = useRef<AbortController | null>(null)
   const compositionsRequest = useRef<AbortController | null>(null)
   const handledMusicRequest = useRef(0)
+  const cameraPromptShown = useRef(false)
   const saved = useSavedData()
   const refreshSaved = saved.refresh
   const requestMusic = useCallback(() => setMusicRequest((value) => value + 1), [])
@@ -297,6 +324,12 @@ export default function App({ debug = false }: { debug?: boolean }) {
   useEffect(() => {
     if (busy) companionRef.current?.focus()
   }, [busy])
+  useEffect(() => {
+    if (compositionMode && !cameraPromptShown.current) {
+      cameraPromptShown.current = true
+      setCameraPromptOpen(true)
+    }
+  }, [compositionMode])
 
   const refreshConnection = useCallback(() => {
     healthRequest.current?.abort()
@@ -405,23 +438,48 @@ export default function App({ debug = false }: { debug?: boolean }) {
     },
     [music],
   )
-  const beat = useCallback(() => {
-    const at = music.beat()
+  const beat = useCallback((effect: Instrument, intensity: number, pitch: EffectPitch) => {
+    const at = music.beat(effect, intensity, pitch)
     if (at === null || !activeCompositionId) return
-    void saveCompositionBeat(activeCompositionId, at).then(
-      ({ beats, duration }) => {
+    void saveCompositionEffect(activeCompositionId, {
+      at,
+      effect,
+      intensity,
+      pitch,
+    }).then(
+      ({ effects, duration }) => {
         setCompositions((items) =>
           items.map((item) =>
-            item.id === activeCompositionId ? { ...item, beats, duration } : item,
+            item.id === activeCompositionId ? { ...item, effects, duration } : item,
           ),
         )
         setMusicError('')
       },
-      () => setMusicError('The beat played, but could not be saved.'),
+      () => setMusicError('The effect played, but could not be saved.'),
     )
   }, [activeCompositionId, music])
+  const removeEffect = useCallback((effectId: string) => {
+    if (!activeCompositionId) return
+    void deleteCompositionEffect(activeCompositionId, effectId).then(
+      ({ effects, duration }) => {
+        setCompositions((items) =>
+          items.map((item) =>
+            item.id === activeCompositionId ? { ...item, effects, duration } : item,
+          ),
+        )
+        setMusicError('')
+        if (playing && activeComposition)
+          void music.playComposition(activeComposition.url).catch(() => {
+            setPlaying(false)
+            setMusicError('The updated composition could not be played.')
+          })
+      },
+      () => setMusicError('The effect could not be removed.'),
+    )
+  }, [activeComposition, activeCompositionId, music, playing])
   const stopAll = () => {
     music.stop()
+    setCameraEnabled(false)
     setCapturePhase('idle')
     setPlaying(false)
     setActiveCompositionId(null)
@@ -714,7 +772,7 @@ export default function App({ debug = false }: { debug?: boolean }) {
             aria-label="Voice companion"
             tabIndex={-1}
           >
-            <div className="flex items-center gap-3">
+            <div className="connection-row">
               <button
                 className={`connection-status ${connection}`}
                 onClick={() => void refreshConnection()}
@@ -726,8 +784,19 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   ? 'Connecting …'
                   : connection === 'online'
                     ? 'Voice ready'
-                    : 'Voice unavailable'}
+                  : 'Voice unavailable'}
               </button>
+              {compositionMode && (
+                <button
+                  type="button"
+                  className={`camera-permission ${cameraEnabled ? 'online' : ''}`}
+                  aria-pressed={cameraEnabled}
+                  onClick={() => setCameraEnabled(!cameraEnabled)}
+                >
+                  {cameraEnabled ? <CameraOff size={20} /> : <Camera size={20} />}
+                  {cameraEnabled ? 'Camera on' : 'Enable camera'}
+                </button>
+              )}
             </div>
             {preparingMusicStyle ? (
               <div className="record-art music-preparation" role="status">
@@ -809,8 +878,16 @@ export default function App({ debug = false }: { debug?: boolean }) {
                   </button>
                   <button onClick={stopAll}>Back to your songs</button>
                 </div>
-                <CompositionTimeline composition={activeComposition} />
-                <MouthBeatbox active={playing} onBeat={beat} />
+                <CompositionTimeline
+                  composition={activeComposition}
+                  onRemove={removeEffect}
+                />
+                <MouthBeatbox
+                  active={playing}
+                  enabled={cameraEnabled}
+                  effects={instruments}
+                  onBeat={beat}
+                />
               </>
             )}
             {companion.error && (
@@ -998,6 +1075,62 @@ export default function App({ debug = false }: { debug?: boolean }) {
           Stop
         </button>
       )}
+      <Dialog
+        open={cameraPromptOpen}
+        onClose={() => setCameraPromptOpen(false)}
+        title="Add effects with your mouth?"
+        alert
+      >
+        <div className="camera-alert-copy">
+          <span aria-hidden="true">
+            <svg
+              className="mouth-sound-pictogram"
+              viewBox="0 0 64 64"
+              width="42"
+              height="42"
+              fill="none"
+            >
+              <path
+                d="M5 31c6-8 12-11 19-7 7-4 13-1 19 7-6 8-12 11-19 11S11 39 5 31Z"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9 31c10 3 20 3 30 0"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinecap="round"
+              />
+              <path
+                d="M48 26c3 3 3 9 0 12M55 20c7 7 7 17 0 24"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <p>
+            Allow camera access to add sounds by opening your mouth. Video is
+            processed on this Mac and is never recorded.
+          </p>
+        </div>
+        <div className="camera-alert-actions">
+          <button
+            type="button"
+            className="dialog-primary"
+            onClick={() => {
+              setCameraPromptOpen(false)
+              setCameraEnabled(true)
+            }}
+          >
+            <Camera size={20} /> Enable camera
+          </button>
+          <button type="button" onClick={() => setCameraPromptOpen(false)}>
+            Not now
+          </button>
+        </div>
+      </Dialog>
       <Dialog
         open={dialog === 'help'}
         onClose={() => setDialog(null)}
