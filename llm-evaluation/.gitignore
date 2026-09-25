@@ -1,0 +1,10 @@
+node_modules/
+.cache/
+.venv/
+.python-version
+__pycache__/
+.promptfoo/
+.data/
+results*.json
+results*.html
+results*.csv

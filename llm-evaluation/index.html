@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tonumo · Evaluationslabor</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./agent-demo.css">
+  <link rel="stylesheet" href="./motion-demo.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Lora&display=swap">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --font-sans: 'DM Sans', sans-serif;
+      --font-serif: 'Lora', Georgia, serif;
+      --color-paper: #fbfaf7;
+      --color-soft: #f4eee3;
+      --color-sage: #e9eee4;
+      --color-brown: #583b2b;
+      --color-ink: #352c26;
+      --color-muted: #65584e;
+      --color-yellow: #ffdf63;
+      --color-orange: #ff9a59;
+      --color-line: #e5dfd5;
+      --color-control: #948678;
+    }
+    @layer base {
+      body { @apply m-0 bg-paper font-sans text-ink; min-width: 320px; }
+      button, input, textarea, select { font: inherit; }
+      button, input:not([type=checkbox]), select { min-height: 3rem; }
+      button { @apply cursor-pointer rounded-xl border border-control px-4 py-2 font-semibold; }
+      button:hover:not(:disabled) { filter: brightness(.96); }
+      button:disabled { @apply cursor-not-allowed bg-[#ece8e1] text-muted; }
+      input:not([type=checkbox]), textarea, select { @apply w-full rounded-xl border border-control bg-white px-3 py-2; }
+      textarea { resize: vertical; }
+      input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: #583b2b; }
+      label { @apply font-medium; }
+      summary { @apply cursor-pointer py-3 font-medium; }
+      :focus-visible { outline: 4px solid #225c91; outline-offset: 5px; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+      ::selection { background: #ffdf63; color: #352c26; }
+    }
+    @layer components {
+      .card { @apply min-w-0 rounded-3xl border border-line bg-white p-5 sm:p-6; }
+      .check { @apply inline-flex min-h-12 items-center gap-2 text-sm; }
+      .error { @apply text-[#79452f]; }
+      .tab[aria-selected=true] { @apply border-brown bg-brown text-white; }
+    }
+  </style>
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <main class="mx-auto max-w-[1440px] space-y-6 px-4 py-8 sm:px-8">
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <p class="mb-3 text-sm font-bold tracking-widest text-brown">TONUMO / LOKALE AUSWERTUNG</p>
+        <h1 class="text-3xl font-bold text-brown sm:text-4xl">Prompts verfeinern. <span class="font-serif font-normal">Wirkung erleben.</span></h1>
+        <p class="mt-3 text-muted">Ein lokales Labor für Tante Emmas Antworten, Stimme und Entscheidungen.</p>
+      </div>
+      <p id="storage-status" role="status" hidden class="text-sm text-muted">Änderungen werden in diesem Browser gespeichert.</p>
+    </header>
+
+    <nav class="flex flex-wrap gap-2" role="tablist" aria-label="Werkzeuge zur Auswertung">
+      <button id="overview-tab" class="tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Überblick</button>
+      <button id="prompt-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="prompt-panel" tabindex="-1">Prompts vergleichen</button>
+      <button id="promptfoo-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="promptfoo-panel" tabindex="-1">Promptfoo</button>
+      <button id="tone-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tone-panel" tabindex="-1">Stimmwirkung</button>
+      <button id="voices-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="voices-panel" tabindex="-1">Supertonic-Stimmen</button>
+      <button id="agent-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="agent-panel" tabindex="-1">Agent-Darstellung</button>
+      <button id="motion-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="motion-panel" tabindex="-1">Motion capture</button>
+      <button id="decision-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="decision-panel" tabindex="-1">Lokale Entscheidungen</button>
+      <button id="memory-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="memory-panel" tabindex="-1">Gedächtnis-Demo</button>
+      <button id="images-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="images-panel" tabindex="-1">Bilder vergleichen</button>
+    </nav>
+
+    <section id="overview-panel" role="tabpanel" aria-labelledby="overview-tab" tabindex="0" class="space-y-6">
+      <figure class="card space-y-6" aria-labelledby="pipeline-heading" aria-describedby="pipeline-caption">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="max-w-3xl">
+            <h2 id="pipeline-heading" class="text-2xl font-bold text-brown">Vom Zuhören <span class="font-serif font-normal">zum Antworten.</span></h2>
+            <p class="mt-2 text-muted">Wir prüfen jeden Schritt einzeln und anschließend das ganze Gespräch: Versteht Tante Emma die Person, antwortet sie passend und behält sie das Richtige?</p>
+          </div>
+          <span class="rounded-full bg-soft px-3 py-1 text-sm">Geplante Pipeline</span>
+        </div>
+
+        <ol class="grid gap-8 lg:grid-cols-4" aria-label="Geplanter Ablauf eines Gesprächsschritts">
+          <li class="relative min-w-0 rounded-2xl bg-soft p-5">
+            <p class="text-xs font-bold tracking-widest text-muted">01 / ZUHÖREN</p>
+            <h3 class="mt-2 text-lg font-bold text-brown">Audio verstehen</h3>
+            <p class="mt-1 text-sm text-muted">Dasselbe Audio, zwei parallele Wege.</p>
+            <div class="mt-4 space-y-3 text-sm">
+              <div class="rounded-xl bg-white p-3"><h4 class="font-semibold">STT → Text</h4><p class="mt-1 text-muted">Wortfehlerrate, Namen, Dialekte und Störgeräusche prüfen.</p></div>
+              <div class="rounded-xl bg-white p-3"><h4 class="font-semibold">Tone of voice → Stimmwirkung</h4><p class="mt-1 text-muted">Mit menschlichen Einschätzungen abgleichen; Unsicherheit mitgeben.</p></div>
+            </div>
+            <span aria-hidden="true" class="absolute -bottom-7 left-1/2 text-xl text-muted lg:bottom-auto lg:-right-6 lg:top-1/2 lg:left-auto"><span class="lg:hidden">↓</span><span class="hidden lg:inline">→</span></span>
+          </li>
+          <li class="relative min-w-0 rounded-2xl bg-sage p-5">
+            <p class="text-xs font-bold tracking-widest text-muted">02 / VORBEREITEN</p>
+            <h3 class="mt-2 text-lg font-bold text-brown">Kontext &amp; Token</h3>
+            <div class="mt-4 space-y-4 text-sm">
+              <div><h4 class="font-semibold">Memory abrufen</h4><p class="mt-1 text-muted">Relevante Erinnerungen finden. Korrekturen, Aktualität und Widersprüche prüfen.</p></div>
+              <div><h4 class="font-semibold">Eingaben zusammenführen</h4><p class="mt-1 text-muted">Text + Stimmwirkung + System-Prompt + ausgewählter Kontext.</p></div>
+              <div><h4 class="font-semibold">Tokenisierung</h4><p class="mt-1 text-muted">Mit dem Modell-Tokenizer zählen; Kontextgrenze einhalten und Platz für die Antwort lassen.</p></div>
+            </div>
+            <span aria-hidden="true" class="absolute -bottom-7 left-1/2 text-xl text-muted lg:bottom-auto lg:-right-6 lg:top-1/2 lg:left-auto"><span class="lg:hidden">↓</span><span class="hidden lg:inline">→</span></span>
+          </li>
+          <li class="relative min-w-0 rounded-2xl border border-line bg-paper p-5">
+            <p class="text-xs font-bold tracking-widest text-muted">03 / ANTWORTEN</p>
+            <h3 class="mt-2 text-lg font-bold text-brown">LLM auswerten</h3>
+            <ul class="mt-4 space-y-4 text-sm">
+              <li><h4 class="font-semibold">Prompt-Evaluation</h4><p class="mt-1 text-muted">Anweisungen und Varianten vergleichen.</p></li>
+              <li><h4 class="font-semibold">Modell-Evaluation</h4><p class="mt-1 text-muted">Relevanz, Faktentreue und Laufzeit prüfen.</p></li>
+              <li><h4 class="font-semibold">Guardrails verifizieren</h4><p class="mt-1 text-muted">Ein- und Ausgabe prüfen; Injektionen und erfundene Fähigkeiten testen.</p></li>
+              <li><h4 class="font-semibold">Individuell verfeinern</h4><p class="mt-1 text-muted">Anrede, Ton und Antwortlänge abstimmen.</p></li>
+            </ul>
+            <span aria-hidden="true" class="absolute -bottom-7 left-1/2 text-xl text-muted lg:bottom-auto lg:-right-6 lg:top-1/2 lg:left-auto"><span class="lg:hidden">↓</span><span class="hidden lg:inline">→</span></span>
+          </li>
+          <li class="min-w-0 rounded-2xl bg-soft p-5">
+            <p class="text-xs font-bold tracking-widest text-muted">04 / SPRECHEN</p>
+            <h3 class="mt-2 text-lg font-bold text-brown">TTS &amp; Stimme</h3>
+            <p class="mt-1 text-sm text-muted">Geprüfter Antworttext → Audio.</p>
+            <div class="mt-4 space-y-4 text-sm">
+              <div><h4 class="font-semibold">Voice-Evaluation</h4><p class="mt-1 text-muted">Verständlichkeit, Natürlichkeit, Aussprache und Sprechtempo hören und bewerten.</p></div>
+              <div><h4 class="font-semibold">Passende Stimmwirkung</h4><p class="mt-1 text-muted">Passt die Stimme zur Antwort und zur Situation?</p></div>
+            </div>
+          </li>
+        </ol>
+
+        <div class="flex items-start gap-3 rounded-2xl border border-line px-4 py-3 text-sm">
+          <span aria-hidden="true" class="text-xl text-brown">↩</span>
+          <p><strong class="text-brown">Memory nach dem Gesprächsschritt aktualisieren.</strong> <span class="text-muted">Behalten, zusammenfassen oder verwerfen; Fakten erhalten und persönliche Angaben nur mit Zustimmung speichern. Beim nächsten Schritt wieder als Kontext abrufen.</span></p>
+        </div>
+        <figcaption id="pipeline-caption" class="text-sm text-muted">Zielbild: Memory bildet eine Rückkopplung; Tokenisierung bereitet den gesamten LLM-Eingang vor. Die Werkzeuge im Labor testen bisher einzelne Bausteine.</figcaption>
+      </figure>
+
+      <section aria-labelledby="coverage-heading" class="space-y-3">
+        <h2 id="coverage-heading" class="text-xl font-bold text-brown">Was wir zusätzlich mitprüfen</h2>
+        <div class="grid gap-4 md:grid-cols-3">
+          <article class="card"><h3 class="font-semibold text-brown">Gesprächsfluss</h3><p class="mt-2 text-sm text-muted">Spracherkennung startet und endet zum richtigen Zeitpunkt: VAD, Pausen, Sprecherwechsel und Unterbrechungen testen.</p></article>
+          <article class="card"><h3 class="font-semibold text-brown">Gesamtlaufzeit &amp; Ausfälle</h3><p class="mt-2 text-sm text-muted">Vom Ende der Eingabe bis zum ersten hörbaren Wort messen. Timeouts, Offline-Fälle und sichere Rückfragen auf dem iPad prüfen.</p></article>
+          <article class="card"><h3 class="font-semibold text-brown">Gemeinsame Testfälle</h3><p class="mt-2 text-sm text-muted">Gleiche Audio- und Mehrturn-Fälle mit klaren Bewertungskriterien nutzen. Menschliche Bewertungen, Regressionen und das Löschen von Erinnerungen einplanen.</p></article>
+        </div>
+      </section>
+
+      <section class="card flex flex-wrap items-center justify-between gap-4" aria-labelledby="available-heading">
+        <div><h2 id="available-heading" class="font-bold text-brown">Schon im Labor</h2><p class="mt-1 text-sm text-muted">Prompt-/Modellvergleich, Promptfoo-Auswertungen, Stimmwirkung, Supertonic-Stimmen, lokale Entscheidungen und der vollständige Gedächtnisfluss.</p></div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" data-open-tab="prompt-tab" class="bg-yellow">Prompts testen <span aria-hidden="true">→</span></button>
+          <button type="button" data-open-tab="promptfoo-tab">Auswertungen ansehen</button>
+          <button type="button" data-open-tab="tone-tab">Stimme testen</button>
+          <button type="button" data-open-tab="voices-tab">Supertonic hören</button>
+          <button type="button" data-open-tab="agent-tab">Agent-Darstellung testen</button>
+          <button type="button" data-open-tab="motion-tab">Bewegung erfassen</button>
+          <button type="button" data-open-tab="decision-tab">Memory testen</button>
+          <button type="button" data-open-tab="memory-tab">Gedächtnisfluss testen</button>
+          <button type="button" data-open-tab="images-tab">Bilder auswerten</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="motion-panel" role="tabpanel" aria-labelledby="motion-tab" hidden class="motion-demo" lang="en">
+      <div class="motion-intro">
+        <div><p class="motion-eyebrow">WEBCAM EXPLORER</p><h2>See your movement.</h2><p>One person. Every little movement. Explore your face, body, and fingers in real time.</p></div>
+        <button id="motion-toggle" class="motion-toggle" type="button">Start camera</button>
+      </div>
+      <p id="motion-error" class="motion-error" role="alert" hidden></p>
+      <section class="motion-sound-panel" aria-labelledby="motion-sound-title">
+        <div class="motion-sound-heading"><div><h3 id="motion-sound-title">Movement → music</h3><p>Shape a little melody, or play an accent with a gesture.</p></div><button id="motion-sound" type="button" aria-pressed="false">Start sound</button></div>
+        <div class="motion-sound-controls">
+          <button id="motion-center" type="button">Center pose</button>
+          <label for="motion-volume">Volume <span id="motion-volume-value">30%</span><input id="motion-volume" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+          <label for="motion-sensitivity">Sensitivity <span id="motion-sensitivity-value">1.0×</span><input id="motion-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1"></label>
+        </div>
+        <p id="motion-sound-status" role="status">Sound is off. Start sound to hear the demo loop.</p>
+        <details class="motion-mapping-options"><summary>Choose your movements &amp; effects</summary><p>Center your pose with your hands comfortably in view. Tilt your head, bend a finger, lift a hand or move it left/right in the mirrored preview. Accents and music controls fire at 65%; return below 30% to rearm. Effects follow the movement continuously. “Off” disables a mapping.</p><p>Try: Lift hand → Volume swell · Move left → Next phrase · Move right → Echo. Volume swell ranges from a quarter of your chosen volume to full volume. Hand movement uses the camera frame; keep your body still. A hand returning into view gets a new center.</p><div id="motion-mappings"></div></details>
+      </section>
+      <div class="motion-statusbar">
+        <p role="status"><span id="motion-dot" class="motion-dot"></span><span id="motion-status">Camera is off</span></p>
+        <span><span id="motion-total">0</span> detected points <span class="motion-separator">/</span> <span id="motion-fps">0</span> fps</span>
+      </div>
+      <div class="motion-views">
+        <section class="motion-panel" aria-labelledby="motion-camera-title">
+          <div class="motion-panel-heading"><h3 id="motion-camera-title">01 <span>Camera view</span></h3><span>Mirrored</span></div>
+          <div class="motion-stage">
+            <video id="motion-video" muted playsinline aria-label="Live webcam, mirrored"></video>
+            <canvas id="motion-overlay" width="640" height="480" aria-label="Detected landmarks over the webcam" role="img"></canvas>
+            <div id="motion-camera-placeholder" class="motion-placeholder"><strong>Your movement starts here</strong><span>Start the camera when you’re ready.</span></div>
+          </div>
+          <p class="motion-panel-note">Sit or stand comfortably. Keep your face and hands in view.</p>
+        </section>
+        <section class="motion-panel" aria-labelledby="motion-skeleton-title">
+          <div class="motion-panel-heading"><h3 id="motion-skeleton-title">02 <span>Skeleton sketch</span></h3><span>Live landmarks</span></div>
+          <div class="motion-stage motion-grid">
+            <canvas id="motion-skeleton" width="640" height="480" aria-label="Live body, face, and finger skeleton" role="img"></canvas>
+            <div id="motion-skeleton-placeholder" class="motion-placeholder"><strong>Looking for landmarks</strong><span>Your skeleton will follow your movement.</span></div>
+          </div>
+          <p class="motion-panel-note">Visible joints only. Step back to bring your legs into the frame.</p>
+        </section>
+      </div>
+      <fieldset class="motion-layers"><legend>Show in the sketch</legend>
+        <label><input type="checkbox" data-motion-layer="body" checked><span class="motion-swatch" style="background:#ffd76a"></span>Body &amp; arms</label>
+        <label><input type="checkbox" data-motion-layer="face" checked><span class="motion-swatch" style="background:#a4dfc5"></span>Face &amp; nose</label>
+        <label><input type="checkbox" data-motion-layer="eyes" checked><span class="motion-swatch" style="background:#8dccff"></span>Eyes &amp; eyebrows</label>
+        <label><input type="checkbox" data-motion-layer="mouth" checked><span class="motion-swatch" style="background:#ff9da9"></span>Mouth</label>
+        <label><input type="checkbox" data-motion-layer="hands" checked><span class="motion-swatch" style="background:#d5b2ff"></span>Hands &amp; fingers</label>
+      </fieldset>
+      <div class="motion-detail-heading"><h3>A closer look</h3><p>Enlarged details · same live movement</p></div>
+      <div class="motion-details">
+        <section class="motion-detail" aria-labelledby="motion-face-title">
+          <div class="motion-panel-heading"><h4 id="motion-face-title">Face</h4><span><span data-motion-count="face">0</span> / 478 points</span></div>
+          <div class="motion-detail-stage motion-grid"><canvas id="motion-face" width="480" height="300" role="img" aria-label="Enlarged face mesh with eyes, eyebrows, nose, and lips"></canvas><span class="motion-detail-empty" data-motion-empty="face">Face not in view</span></div>
+          <div class="motion-expressions">
+            <label><span>Mouth open</span><meter min="0" max="1" value="0" data-motion-expression="jawOpen" aria-label="Mouth open"></meter><span class="motion-score">—</span></label>
+            <label><span>Left blink</span><meter min="0" max="1" value="0" data-motion-expression="eyeBlinkLeft" aria-label="Left blink"></meter><span class="motion-score">—</span></label>
+            <label><span>Right blink</span><meter min="0" max="1" value="0" data-motion-expression="eyeBlinkRight" aria-label="Right blink"></meter><span class="motion-score">—</span></label>
+          </div>
+          <p class="motion-hand-note">Head values: relative movement from your centered pose, not degrees.</p>
+          <div class="motion-readouts" data-motion-readouts="Face &amp; head" aria-label="Head movement values and effects"></div>
+        </section>
+        <section class="motion-detail" aria-labelledby="motion-left-title">
+          <div class="motion-panel-heading"><h4 id="motion-left-title">Left hand</h4><span><span data-motion-count="Left">0</span> / 21 points</span></div>
+          <div class="motion-detail-stage motion-grid"><canvas id="motion-Left" width="480" height="300" role="img" aria-label="Enlarged left hand and all five fingers"></canvas><span class="motion-detail-empty" data-motion-empty="Left">Hand not in view</span></div>
+          <div class="motion-fingers"></div><p class="motion-hand-note">Wrist, knuckles, joints &amp; fingertips</p>
+          <div class="motion-readouts" data-motion-readouts="Left hand" aria-label="Left hand movement values and effects"></div>
+        </section>
+        <section class="motion-detail" aria-labelledby="motion-right-title">
+          <div class="motion-panel-heading"><h4 id="motion-right-title">Right hand</h4><span><span data-motion-count="Right">0</span> / 21 points</span></div>
+          <div class="motion-detail-stage motion-grid"><canvas id="motion-Right" width="480" height="300" role="img" aria-label="Enlarged right hand and all five fingers"></canvas><span class="motion-detail-empty" data-motion-empty="Right">Hand not in view</span></div>
+          <div class="motion-fingers"></div><p class="motion-hand-note">Wrist, knuckles, joints &amp; fingertips</p>
+          <div class="motion-readouts" data-motion-readouts="Right hand" aria-label="Right hand movement values and effects"></div>
+        </section>
+      </div>
+      <p class="motion-footer">Video stays in this browser. Nothing is recorded or uploaded. Use one person at a time, with good lighting and space to move. Leaving this tab stops the camera.</p>
+    </section>
+
+    <section id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" hidden class="space-y-6" data-state="idle">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="max-w-3xl">
+          <p class="text-sm font-semibold text-muted">GESTALTUNGSENTWURF · FÜR ÄLTERE MENSCHEN</p>
+          <h2 class="mt-2 text-2xl font-bold text-brown">Wenig Bewegung. <span class="font-serif font-normal">Klar im Gespräch.</span></h2>
+          <p class="mt-2 text-muted">Drei Varianten mit derselben Stimme und denselben Worten. Die Figur bleibt ruhig; nur die Sprechzeichen reagieren auf das Audio.</p>
+        </div>
+        <label class="check"><input id="agent-reduced-motion" type="checkbox"> Ohne Animation</label>
+      </div>
+
+      <section class="agent-transport space-y-3" aria-label="Gespräch abspielen">
+        <div class="flex flex-wrap gap-3">
+          <button id="agent-speak" type="button" class="bg-yellow">Satz abspielen</button>
+          <button id="agent-conversation" type="button">Kurzes Gespräch abspielen</button>
+          <button id="agent-stop" type="button" disabled>Stoppen</button>
+        </div>
+        <p id="agent-status" role="status" class="text-sm text-muted">Ein Beispiel abspielen. Alle drei Varianten reagieren gleichzeitig.</p>
+        <div id="agent-transcript" hidden class="agent-transcript"><p id="agent-speaker" class="text-sm font-semibold text-muted"></p><p id="agent-caption" class="mt-1 text-xl text-brown"></p></div>
+        <audio id="agent-audio" hidden controls preload="none" class="w-full" aria-label="Sprachausgabe der Agent-Darstellung"></audio>
+        <p class="text-sm text-muted">Echte Sprachausgabe. Zuhören und Musikerstellung sind Vorschauen: kein Mikrofon, keine Musikgenerierung.</p>
+      </section>
+
+      <div id="agent-options" class="agent-options">
+        <article class="agent-option" aria-labelledby="agent-person-title">
+          <div class="agent-option-heading"><span>01 · PERSON</span><span class="agent-recommendation">Startempfehlung</span></div>
+          <h3 id="agent-person-title">Ein klares Gegenüber</h3>
+          <div class="agent-preview" aria-hidden="true">
+            <svg class="agent-art" viewBox="0 0 200 160" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="74" cy="54" r="25" fill="#eee4d6"/>
+              <path d="M27 133v-9c0-24 19-40 47-40s47 16 47 40v9Z" fill="#eee4d6"/>
+              <path d="M132 30h38a13 13 0 0 1 13 13v29a13 13 0 0 1-13 13h-22l-17 12V84a13 13 0 0 1-12-13V43a13 13 0 0 1 13-13Z" fill="#fbf7ef"/>
+              <g class="agent-sound" stroke="#965033"><path data-agent-bar d="M136 53v10"/><path data-agent-bar d="M151 44v28"/><path data-agent-bar d="M166 50v16"/></g>
+            </svg>
+          </div>
+          <div class="agent-preview-copy"><p data-agent-title>Bereit für ein Gespräch</p><p data-agent-hint>Welche Musik magst du?</p></div>
+          <p class="agent-option-note">Kopf und Schultern, ohne Gesicht. Die Sprechblase lädt zum Gespräch ein.</p>
+        </article>
+        <article class="agent-option" aria-labelledby="agent-bubble-title">
+          <div class="agent-option-heading"><span>02 · SPRECHBLASE</span></div>
+          <h3 id="agent-bubble-title">Ganz ohne Figur</h3>
+          <div class="agent-preview" aria-hidden="true">
+            <svg class="agent-art" viewBox="0 0 200 160" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M48 29h104a24 24 0 0 1 24 24v48a24 24 0 0 1-24 24H89l-36 22v-22h-5a24 24 0 0 1-24-24V53a24 24 0 0 1 24-24Z" fill="#eee4d6"/>
+              <g class="agent-sound" stroke="#965033"><path data-agent-bar d="M76 68v18"/><path data-agent-bar d="M100 53v48"/><path data-agent-bar d="M124 63v28"/></g>
+            </svg>
+          </div>
+          <div class="agent-preview-copy"><p data-agent-title>Bereit für ein Gespräch</p><p data-agent-hint>Welche Musik magst du?</p></div>
+          <p class="agent-option-note">Ein Gesprächssymbol ohne menschliche Züge. Der Text erklärt, wer dran ist.</p>
+        </article>
+        <article class="agent-option" aria-labelledby="agent-face-title">
+          <div class="agent-option-heading"><span>03 · MINIMALES GESICHT</span></div>
+          <h3 id="agent-face-title">Ein wenig Persönlichkeit</h3>
+          <div class="agent-preview" aria-hidden="true">
+            <svg class="agent-art" viewBox="0 0 200 160" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="25" y="32" width="105" height="105" rx="37" fill="#eee4d6"/>
+              <circle cx="60" cy="76" r="4" fill="currentColor" stroke="none"/><circle cx="95" cy="76" r="4" fill="currentColor" stroke="none"/>
+              <path d="M66 102h22"/>
+              <g class="agent-sound" stroke="#965033"><path data-agent-bar d="M148 73v16"/><path data-agent-bar d="M164 62v38"/><path data-agent-bar d="M180 69v24"/></g>
+            </svg>
+          </div>
+          <div class="agent-preview-copy"><p data-agent-title>Bereit für ein Gespräch</p><p data-agent-hint>Welche Musik magst du?</p></div>
+          <p class="agent-option-note">Zwei Augen, ein ruhiger Mund. Keine Mimik, kein Blinzeln und keine Lippenbewegung.</p>
+        </article>
+      </div>
+
+      <details class="card space-y-4">
+        <summary class="text-lg font-bold text-brown">Beispielsatz und Stimme ändern</summary>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label>Beispielsatz<select id="agent-phrase" class="mt-1"></select></label>
+          <label>Stimme<select id="agent-voice" class="mt-1"></select></label>
+        </div>
+        <label class="block">Gesprochener Text<textarea id="agent-text" rows="2" maxlength="1000" lang="de" class="mt-1"></textarea></label>
+        <p class="text-sm text-muted">Gesprächsvorschau: Begrüßung → Beispielantwort als Text → gesprochene Antwort → Musikerstellung → bereit. Beim ersten Vorlesen kann das Laden der Stimme etwas dauern.</p>
+      </details>
+
+      <div class="flex flex-wrap items-center gap-3" role="group" aria-label="Zustände ohne Sprache ansehen">
+        <span class="text-sm font-semibold text-muted">Zustand ansehen</span>
+        <button type="button" data-agent-state="idle" aria-pressed="true">Bereit zum Gespräch</button>
+        <button type="button" data-agent-state="listening" aria-pressed="false">Zuhören</button>
+        <button type="button" data-agent-state="creating" aria-pressed="false">Musik erstellen</button>
+        <button type="button" data-agent-state="ready" aria-pressed="false">Musik bereit</button>
+      </div>
+      <p class="text-sm text-muted">Gleiche Position, große Schrift und klare Worte in jedem Zustand. Die Einstellung für reduzierte Bewegung des Geräts wird automatisch berücksichtigt.</p>
+    </section>
+
+    <div id="prompt-panel" role="tabpanel" aria-labelledby="prompt-tab" hidden class="space-y-6">
+      <section class="card" aria-labelledby="shared-heading">
+      <fieldset id="shared" class="space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="shared-heading" class="text-xl font-bold text-brown">Gemeinsame Einstellungen</h2>
+          <span class="rounded-full bg-sage px-3 py-1 text-sm">Gleich für A und B</span>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="min-w-0 flex-1">Ollama-Adresse
+            <input id="endpoint" data-save type="url" value="http://127.0.0.1:11434" spellcheck="false" class="mt-1">
+          </label>
+          <button id="refresh-models" type="button">Modelle aktualisieren</button>
+        </div>
+        <p id="connection-status" role="status" class="text-sm text-muted">Installierte Modelle werden geladen…</p>
+        <div class="grid gap-6 border-t border-line pt-4 md:grid-cols-2">
+          <div class="min-w-0 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="font-semibold">Personenkontext · Schlüssel / Wert</h3>
+              <button id="add-row" type="button">Zeile hinzufügen</button>
+            </div>
+            <div id="context-rows" class="space-y-2"></div>
+            <p class="text-sm text-muted">iPad-Vorgaben · bis zu 20 Zeilen / 2.000 Zeichen. Leere Paare werden ausgelassen. Aktuelles Jahr: <span id="current-year"></span>.</p>
+          </div>
+          <div class="min-w-0 space-y-3">
+            <label class="block" for="input-text">Eingabetext <span class="font-normal text-muted">· für beide Varianten</span></label>
+            <textarea id="input-text" data-save rows="4" maxlength="1000" lang="de">Hallo, heute ist es aber echt kalt</textarea>
+            <details>
+              <summary>Generierungseinstellungen</summary>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label>Temperatur <input id="temperature" data-save type="number" min="0" max="2" step="0.1" value="0.7" class="mt-1"></label>
+                <label>Maximale Ausgabe-Token <input id="max-tokens" data-save type="number" min="1" max="8192" step="1" value="120" class="mt-1"></label>
+              </div>
+              <p class="mt-3 text-sm text-muted">iPad-Qwen-Vorgaben: Denken aus · Top-p 0,8 · Wiederholungsstrafe 1,05. Jeder Lauf beginnt ohne Gesprächsverlauf.</p>
+            </details>
+          </div>
+        </div>
+      </fieldset>
+      </section>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button id="compare" type="button" class="bg-yellow disabled:bg-[#ece8e1] disabled:text-muted">Vergleich starten</button>
+        <button id="stop" type="button" class="bg-brown text-white disabled:bg-[#ece8e1] disabled:text-muted" disabled>Stoppen</button>
+        <p id="run-status" role="status" class="text-sm text-muted">Zuerst läuft A, dann B. Antworten erscheinen darunter.</p>
+      </div>
+      <div id="variants" class="grid items-start gap-6 lg:grid-cols-2"></div>
+      <footer class="text-sm text-muted">Mac-/Ollama-Ergebnisse helfen beim Verfeinern. Den besten Prompt anschließend auf dem iPad prüfen; MLX-Ausgabe und Laufzeit können abweichen.</footer>
+    </div>
+
+    <section id="promptfoo-panel" role="tabpanel" aria-labelledby="promptfoo-tab" hidden class="space-y-4">
+      <div class="card space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-xl font-bold text-brown">Automatische Auswertungen · Promptfoo</h2>
+            <p class="mt-1 text-sm text-muted">Gespeicherte Läufe vergleichen, Antworten prüfen und Fehler filtern.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-4">
+            <button id="promptfoo-refresh" type="button">Neu laden</button>
+            <a id="promptfoo-open" target="_blank" rel="noopener noreferrer" hidden class="font-semibold text-brown underline underline-offset-4">In eigenem Tab öffnen ↗</a>
+          </div>
+        </div>
+        <p id="promptfoo-status" role="status" class="text-sm text-muted">Promptfoo wird beim Öffnen dieses Tabs geladen.</p>
+        <p class="text-sm text-muted">Neue Läufe: <code>npm run eval</code> oder <code>npm run eval:hybrid</code>. Änderungen aus „Prompts vergleichen“ werden nicht automatisch übernommen.</p>
+      </div>
+      <iframe id="promptfoo-frame" title="Promptfoo – lokale Evaluationsläufe und Ergebnisse" allow="clipboard-write" hidden class="w-full rounded-3xl border border-line bg-white" style="height: 78vh; min-height: 600px;"></iframe>
+    </section>
+
+    <section id="tone-panel" role="tabpanel" aria-labelledby="tone-tab" hidden class="space-y-6">
+      <div class="card space-y-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="max-w-3xl">
+            <p class="mb-2 text-sm font-bold tracking-widest text-brown">LIVE-AUDIO-EXPERIMENT</p>
+            <h2 class="text-2xl font-bold text-brown">Wie wirkt die Stimme?</h2>
+            <p class="mt-2 text-muted">emotion2vec+ base bewertet während der Aufnahme kurze Sprachabschnitte. Das Audio bleibt auf diesem Computer.</p>
+          </div>
+          <span class="rounded-full bg-sage px-3 py-1 text-sm">emotion2vec+ base · ca. 90 Mio. Parameter</span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 border-y border-line py-5">
+          <button id="tone-record" type="button" aria-pressed="false" class="bg-yellow" disabled>Aufnahme starten</button>
+          <button id="tone-reset" type="button">Zurücksetzen</button>
+          <p id="tone-status" role="status" class="text-sm text-muted">Das Mikrofon ist aus.</p>
+        </div>
+
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,.8fr)]">
+          <div class="rounded-3xl bg-soft p-6">
+            <p class="text-sm font-semibold text-muted">Live-Einschätzung</p>
+            <p id="tone-label" class="mt-2 text-4xl font-bold text-brown">Bereit</p>
+            <p id="tone-score" class="mt-2 text-muted">Aufnahme starten und natürlich sprechen.</p>
+            <div id="tone-level-meter" class="mt-6 h-3 overflow-hidden rounded-full bg-white" role="meter" aria-label="Mikrofonpegel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="tone-level" class="h-full w-0 rounded-full bg-orange transition-[width] duration-150"></div>
+            </div>
+            <div class="mt-3 flex justify-between text-xs text-muted"><span>leise</span><span id="tone-time">0:00</span><span>laut</span></div>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2" role="group" aria-label="Emotionswerte">
+            <div data-tone="angry"><div class="flex justify-between"><span>Wütend</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-orange"></div></div></div>
+            <div data-tone="disgusted"><div class="flex justify-between"><span>Angewidert</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#9c8f77]"></div></div></div>
+            <div data-tone="fearful"><div class="flex justify-between"><span>Ängstlich</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#b08ca3]"></div></div></div>
+            <div data-tone="happy"><div class="flex justify-between"><span>Fröhlich</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-yellow"></div></div></div>
+            <div data-tone="neutral"><div class="flex justify-between"><span>Neutral</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#bea889]"></div></div></div>
+            <div data-tone="other"><div class="flex justify-between"><span>Andere</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#899ba8]"></div></div></div>
+            <div data-tone="sad"><div class="flex justify-between"><span>Traurig</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#7894a7]"></div></div></div>
+            <div data-tone="surprised"><div class="flex justify-between"><span>Überrascht</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-[#8ea27c]"></div></div></div>
+            <div data-tone="unknown"><div class="flex justify-between"><span>Unklar</span><span data-value>0%</span></div><div class="mt-1 h-2 overflow-hidden rounded-full bg-soft"><div data-bar class="h-full w-0 bg-control"></div></div></div>
+          </div>
+        </div>
+
+        <figure class="rounded-3xl border border-line p-4 sm:p-6" aria-labelledby="tone-history-heading" aria-describedby="tone-history-caption">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h3 id="tone-history-heading" class="text-lg font-bold text-brown">Stimmwirkung im Verlauf</h3>
+              <p class="mt-1 text-sm text-muted">Jede Säule zeigt die Verteilung eines ausgewerteten Sprachabschnitts.</p>
+            </div>
+            <label class="text-sm" for="tone-history-range">Zeitraum
+              <select id="tone-history-range" class="mt-1">
+                <option value="0">Gesamter Verlauf</option>
+                <option value="10">Letzte 10 Sekunden</option>
+                <option value="30">Letzte 30 Sekunden</option>
+                <option value="60">Letzte 60 Sekunden</option>
+              </select>
+            </label>
+          </div>
+          <div class="relative mt-5">
+            <svg id="tone-history-chart" viewBox="0 0 800 240" class="block w-full" style="height: 240px" role="img" aria-labelledby="tone-history-heading tone-history-status"></svg>
+            <p id="tone-history-empty" class="absolute inset-0 flex items-center justify-center px-12 text-center text-sm text-muted">Noch keine Auswertungen. Starte eine Aufnahme.</p>
+          </div>
+          <p id="tone-history-status" class="mt-2 text-sm text-muted"></p>
+          <p class="mt-4 text-xs font-semibold text-muted">Durchschnittliche Modellwerte im gewählten Zeitraum</p>
+          <dl id="tone-history-legend" class="mt-2 grid grid-cols-1 gap-x-5 gap-y-2 text-sm min-[380px]:grid-cols-2 sm:grid-cols-3"></dl>
+          <figcaption id="tone-history-caption" class="mt-4 text-xs leading-relaxed text-muted">Zeit seit der ersten Aufnahme. Pausen bleiben als Lücken sichtbar; nach dem Stoppen bleibt der Zeitraum stehen. Der Verlauf bleibt über mehrere Aufnahmen bis zum Zurücksetzen oder Neuladen erhalten. „Zurücksetzen“ stoppt die Aufnahme und löscht Verlauf und Wiedergabe. Modellwerte sind unsichere Schätzungen.</figcaption>
+        </figure>
+
+        <div id="tone-result" hidden class="rounded-2xl border border-line p-4">
+          <p class="font-semibold">Zusammenfassung der Aufnahme</p>
+          <p id="tone-summary" class="mt-1 text-muted"></p>
+          <audio id="tone-playback" class="mt-4 w-full" controls></audio>
+        </div>
+
+        <details>
+          <summary>Was dieses kleine Modell misst</summary>
+          <p class="text-sm leading-relaxed text-muted">Das emotion2vec+-Basismodell mit etwa 90 Mio. Parametern wurde zur Erkennung von neun Emotionsklassen in Sprache trainiert. Dieses Labor sendet überlappende lokale PCM-Abschnitte an das geladene Modell und mittelt die Werte. Die Vorhersagen hängen von Stimme, Sprache, Kultur und Raum ab; sie sind niemals sichere Aussagen über Emotion, Absicht, Gesundheit oder Wahrheit.</p>
+          <pre id="tone-features" class="mt-3 rounded-xl bg-soft p-4 text-xs">Warten auf das lokale Modell…</pre>
+        </details>
+      </div>
+    </section>
+
+    <section id="voices-panel" role="tabpanel" aria-labelledby="voices-tab" hidden class="space-y-6">
+      <section class="card space-y-4" aria-labelledby="voices-heading">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="voices-heading" class="text-2xl font-bold text-brown">Zehn Stimmen. <span class="font-serif font-normal">Dein Text.</span></h2>
+            <p class="mt-2 text-muted">Vergleiche alle Supertonic-3-Stimmen mit demselben deutschen Text. Wähle ein Beispiel oder schreibe selbst.</p>
+          </div>
+          <span class="rounded-full bg-sage px-3 py-1 text-sm">Deutsch · KI-generiert</span>
+        </div>
+        <label class="block">Deutsche Beispielphrase
+          <select id="voices-phrase" class="mt-1"></select>
+        </label>
+        <label class="block">Text zum Vorlesen
+          <textarea id="voices-text" rows="4" maxlength="1000" lang="de" class="mt-1" aria-describedby="voices-hint"></textarea>
+        </label>
+        <p id="voices-hint" class="text-sm text-muted">Bis zu 1.000 Zeichen. Beim ersten Vorlesen werden die Sprachdateien geladen (ca. 400 MB). Danach läuft die Sprachausgabe lokal auf diesem Mac.</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="voices-stop" type="button" disabled>Stoppen</button>
+          <p id="voices-status" role="status" class="text-sm text-muted">Wähle unten eine Stimme zum Vorlesen.</p>
+        </div>
+        <figure id="voices-result" hidden class="space-y-2 rounded-2xl bg-soft p-4">
+          <figcaption id="voices-caption" class="font-semibold text-brown"></figcaption>
+          <audio id="voices-audio" controls preload="none" class="w-full" aria-label="Supertonic-Stimmprobe"></audio>
+          <p id="voices-spoken-text" lang="de" class="text-sm text-muted"></p>
+        </figure>
+      </section>
+      <div id="voices-list" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5" role="group" aria-label="Alle zehn Supertonic-Stimmen"></div>
+      <p class="text-sm text-muted">Supertonic 3 · KI-generierte Sprachausgabe · <a href="https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE" class="underline" target="_blank" rel="noopener noreferrer">OpenRAIL-M-Lizenz</a>.</p>
+    </section>
+
+    <section id="decision-panel" role="tabpanel" aria-labelledby="decision-tab" hidden class="space-y-6">
+      <div class="card space-y-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="max-w-3xl">
+            <p class="mb-2 text-sm font-bold tracking-widest text-brown">LOKALES ENTSCHEIDUNGSEXPERIMENT</p>
+            <h2 class="text-2xl font-bold text-brown">Was soll sich Tante Emma merken?</h2>
+            <p class="mt-2 text-muted">Ein kleines lokales Modell ordnet Aussagen älterer Menschen einer von drei Möglichkeiten zu. Texte bleiben in diesem Browser; das geladene Modell wird für spätere Durchläufe zwischengespeichert.</p>
+          </div>
+          <span class="rounded-full bg-sage px-3 py-1 text-sm">lokales GGUF · WebGPU / WASM</span>
+        </div>
+
+        <fieldset id="decision-model-controls" class="space-y-4">
+          <div class="grid items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+            <label>Lokales Modell
+              <select id="decision-model" class="mt-1">
+                <option value="qwen3-0.6b">Qwen3 0.6B · 639 MB · am besten für das iPad</option>
+                <option value="minicpm5-2b">MiniCPM5 2B · 1,56 GB · leistungsfähiger</option>
+              </select>
+            </label>
+            <button id="decision-load" type="button" class="bg-yellow">Lokales Modell laden</button>
+          </div>
+          <div id="decision-progress-track" class="h-2 overflow-hidden rounded-full bg-soft" role="progressbar" aria-label="Fortschritt beim Laden des Modells" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="decision-progress" class="h-full w-0 rounded-full bg-orange transition-[width] duration-150"></div>
+          </div>
+          <p id="decision-status" role="status" class="text-sm text-muted">Einmal laden und im Browser speichern. Ollama und serverseitige Auswertung werden nicht verwendet.</p>
+        </fieldset>
+      </div>
+
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,.85fr)]">
+        <section class="card space-y-5" aria-labelledby="decision-input-heading">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 id="decision-input-heading" class="text-xl font-bold text-brown">Fünf Alltagssituationen</h3>
+            <div class="flex flex-wrap gap-2" role="group" aria-label="Beispiele für Entscheidungen">
+              <button type="button" data-decision-preset="termin">Arzttermin</button>
+              <button type="button" data-decision-preset="anrede">Anrede</button>
+              <button type="button" data-decision-preset="nachricht">Nachricht</button>
+              <button type="button" data-decision-preset="einkauf">Einkauf</button>
+              <button type="button" data-decision-preset="nebensache">Nebensache</button>
+            </div>
+          </div>
+
+          <label class="block" for="decision-state">Situation
+            <textarea id="decision-state" rows="8" maxlength="4000" class="mt-1">Aktuelles Ziel: Den Alltag und anstehende Termine unterstützen.
+
+Neue Aussage: „Am 17. Oktober um 9 Uhr habe ich einen Termin bei Frau Dr. Berger. Bitte erinnere mich am Vorabend daran.“
+
+Kontext: Die Person bittet ausdrücklich darum, die Information später wieder zu verwenden.</textarea>
+          </label>
+          <label class="block" for="decision-question">Frage
+            <input id="decision-question" maxlength="300" class="mt-1" value="Wie soll die neue Aussage für den Gesprächskontext behandelt werden?">
+          </label>
+
+          <fieldset class="space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <legend class="font-semibold">Mögliche Entscheidungen</legend>
+              <button id="decision-add-option" type="button">Option hinzufügen</button>
+            </div>
+            <div id="decision-options" class="space-y-2"></div>
+            <p class="text-sm text-muted">Situation, Frage und Optionen lassen sich direkt bearbeiten und für weitere Fälle wiederverwenden.</p>
+          </fieldset>
+
+          <button id="decision-run" type="button" class="bg-orange disabled:bg-[#ece8e1] disabled:text-muted" disabled>Lokal auswerten</button>
+        </section>
+
+        <section class="card space-y-5" aria-labelledby="decision-result-heading">
+          <div>
+            <p class="text-sm font-semibold text-muted">Modellentscheidung</p>
+            <h3 id="decision-result-heading" class="mt-1 text-2xl font-bold text-brown">Warten auf ein Modell</h3>
+            <p id="decision-result-summary" class="mt-2 text-muted">Modell laden und anschließend ein Beispiel auswerten.</p>
+          </div>
+          <div id="decision-results" class="space-y-4" aria-live="polite"></div>
+          <div class="rounded-2xl bg-soft p-4 text-sm leading-relaxed text-muted">
+            <strong class="text-ink">Sicherheitsregel:</strong>&nbsp;„Nicht relevant“ ist nur ein Vorschlag. Aktuelle Anliegen, Termine, Zusagen und unsichere Ergebnisse müssen durch feste Regeln geschützt bleiben. Persönliche oder sensible Angaben nur mit klarer Zustimmung dauerhaft speichern.
+          </div>
+          <details>
+            <summary>Technische Details</summary>
+            <pre id="decision-metrics" class="rounded-xl bg-soft p-4 text-xs">Modell noch nicht geladen.</pre>
+          </details>
+        </section>
+      </div>
+    </section>
+
+    <section id="images-panel" role="tabpanel" aria-labelledby="images-tab" hidden class="space-y-6">
+      <div class="card space-y-3">
+        <h2 class="text-2xl font-bold text-brown">Ein Bild. <span class="font-serif font-normal">Mehrere Perspektiven.</span></h2>
+        <p class="text-muted">Foto auswählen, sichtbare Details und mögliche Gefühlshinweise erkunden und die Ergebnisse vergleichen.</p>
+        <p class="text-sm text-muted">Gefühlshinweise nennen einen sichtbaren Beleg und ihre Unsicherheit. Eine offene Frage hilft, die persönliche Bedeutung im Gespräch zu klären.</p>
+        <p class="text-sm text-muted">Auswertung auf dem Rechner der gewählten Ollama-Adresse. Die Zeiten messen diesen Rechner, auch wenn du das Labor am iPad öffnest.</p>
+      </div>
+      <div id="images-controls" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+        <section class="card space-y-4" aria-labelledby="images-input-heading">
+          <h3 id="images-input-heading" class="text-xl font-bold text-brown">Bild &amp; Modell</h3>
+          <label class="block" for="images-file">Foto hochladen</label>
+          <input id="images-file" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="images-file-help">
+          <p id="images-file-help" class="text-sm text-muted">JPEG, PNG oder WebP · bis 10 MB / 40 MP. Für jeden Versuch wird eine JPEG-Kopie mit höchstens 1.024 px Kantenlänge verwendet.</p>
+          <img id="images-preview" hidden class="max-h-64 w-full rounded-xl object-contain bg-paper" alt="Ausgewähltes Foto">
+          <p id="images-image-info" class="break-words text-sm text-muted"></p>
+          <div id="images-metadata" hidden class="space-y-2 rounded-xl bg-paper p-3"></div>
+          <p class="text-xs text-muted">Metadaten werden lokal aus dem Original gelesen und mit dem Versuch gespeichert. Das Bildmodell erhält nur die JPEG-Kopie, keine Metadaten.</p>
+          <label class="block">Ollama-Adresse<input id="images-endpoint" type="url" class="mt-1" spellcheck="false"></label>
+          <div class="flex flex-wrap items-end gap-2">
+            <label class="min-w-0 flex-1">Vision-Modell<select id="images-model" class="mt-1"><option value="qwen3.5:2b">qwen3.5:2b</option></select></label>
+            <button id="images-refresh" type="button">Modelle laden</button>
+          </div>
+          <p class="text-sm text-muted">Fehlt das Modell? Auf dem Ollama-Rechner <code>ollama pull qwen3.5:2b</code> ausführen.</p>
+          <div class="grid grid-cols-2 gap-3">
+            <label>Temperatur<input id="images-temperature" class="mt-1" type="number" min="0" max="2" step="0.1" value="0.1"></label>
+            <label>Max. Ausgabe-Token<input id="images-tokens" class="mt-1" type="number" min="1" max="8192" value="512"></label>
+          </div>
+          <label class="check"><input id="images-schema" type="checkbox" checked>JSON-Schema des Entwurfs erzwingen</label>
+          <p id="images-format-note" class="text-sm text-muted"></p>
+          <details><summary>Vorgegebenes JSON-Schema</summary><pre id="images-schema-preview" role="region" aria-label="JSON-Schema" tabindex="0" class="max-h-64 overflow-auto text-xs"></pre></details>
+        </section>
+        <section class="card space-y-4" aria-labelledby="images-prompt-heading">
+          <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="images-prompt-heading" class="text-xl font-bold text-brown">Prompt</h3><button id="images-reset" type="button">Aktuellen Entwurf laden</button></div>
+          <label for="images-prompt" class="block text-sm text-muted">System-Prompt · wird für jeden Versuch unverändert gespeichert</label>
+          <textarea id="images-prompt" rows="23" maxlength="8000" spellcheck="false" class="font-mono text-sm"></textarea>
+          <p class="text-sm text-muted">Zusammen mit dem Bild senden wir: „Analysiere dieses Foto.“ Jeder Versuch beginnt ohne Gesprächsverlauf. Für ein anderes Ausgabeformat das feste JSON-Schema abwählen.</p>
+        </section>
+      </div>
+      <section class="card space-y-4" aria-labelledby="images-output-heading">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 id="images-output-heading" class="text-xl font-bold text-brown">Aktuelle Ausgabe</h3>
+          <div class="flex gap-2"><button id="images-run" type="button" class="bg-yellow" disabled>Bild auswerten</button><button id="images-stop" type="button" disabled>Stoppen</button></div>
+        </div>
+        <p id="images-status" role="status" class="text-sm text-muted">Foto auswählen und Ollama mit einem Vision-Modell starten.</p>
+        <p id="images-timing" class="text-sm text-muted"></p>
+        <div id="images-emotions" hidden class="space-y-3 rounded-xl bg-sage p-4"></div>
+        <pre id="images-output" role="region" aria-label="Live-Ausgabe des Bildmodells" tabindex="0" class="max-h-96 min-h-24 overflow-auto rounded-xl bg-paper p-4 text-sm"></pre>
+      </section>
+      <section class="space-y-4" aria-labelledby="images-history-heading">
+        <div class="flex flex-wrap items-baseline justify-between gap-3"><h3 id="images-history-heading" class="text-xl font-bold text-brown">Versuche vergleichen</h3><p id="images-history-count" class="text-sm text-muted">0 gespeicherte Versuche</p></div>
+        <p class="text-sm text-muted">Bildkopie, Prompt, Einstellungen und Ausgabe bleiben in diesem Browser gespeichert (IndexedDB). Browserdaten löschen entfernt diese Historie. Wichtige Versuche als JSON exportieren.</p>
+        <p id="images-comparison-note" class="text-sm font-semibold text-brown">Zwei Versuche zum Vergleichen auswählen.</p>
+        <div class="grid gap-6 md:grid-cols-2">
+          <div class="min-w-0 space-y-3"><label class="block">Versuch A<select id="images-left" class="mt-1"></select></label><article id="images-left-card" class="card space-y-3"></article></div>
+          <div class="min-w-0 space-y-3"><label class="block">Versuch B<select id="images-right" class="mt-1"></select></label><article id="images-right-card" class="card space-y-3"></article></div>
+        </div>
+      </section>
+      <template id="images-attempt-template">
+        <h4 data-title class="text-lg font-bold text-brown"></h4>
+        <p data-meta class="break-words text-xs text-muted"></p>
+        <img data-photo class="h-32 w-full rounded-xl bg-paper object-contain" alt="Bild des Versuchs">
+        <p data-image class="break-words text-xs text-muted"></p>
+        <div data-metadata class="space-y-2 rounded-xl bg-paper p-3"></div>
+        <p data-settings class="text-sm text-muted"></p>
+        <pre data-timing class="text-xs text-muted"></pre>
+        <p data-validation class="text-sm"></p>
+        <div data-emotions hidden class="space-y-3 rounded-xl bg-sage p-4"></div>
+        <h5 class="font-semibold">Ausgabe</h5><pre data-output role="region" aria-label="Gespeicherte Ausgabe" tabindex="0" class="max-h-96 overflow-auto rounded-xl bg-paper p-3 text-sm"></pre>
+        <details open><summary>Verwendeter Prompt</summary><pre data-prompt role="region" aria-label="Gespeicherter Prompt" tabindex="0" class="max-h-64 overflow-auto text-xs"></pre></details>
+        <details><summary>Unveränderte Rohausgabe</summary><pre data-raw role="region" aria-label="Unveränderte Rohausgabe" tabindex="0" class="max-h-64 overflow-auto text-xs"></pre></details>
+        <div class="flex flex-wrap gap-2"><button data-images-reuse type="button">Als neuen Versuch laden</button><button data-export type="button">JSON exportieren</button><button data-images-delete type="button">Versuch löschen</button></div>
+      </template>
+    </section>
+
+    <section id="memory-panel" role="tabpanel" aria-labelledby="memory-tab" hidden class="space-y-6">
+      <section class="card space-y-5" aria-labelledby="memory-heading">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="max-w-3xl">
+            <p class="mb-2 text-sm font-bold tracking-widest text-brown">VOLLSTÄNDIGER LOKALER TESTABLAUF</p>
+            <h2 id="memory-heading" class="text-2xl font-bold text-brown">Persönliches Gedächtnis <span class="font-serif font-normal">mit Zustimmung.</span></h2>
+            <p class="mt-2 text-muted">Person auswählen oder neu anlegen, Ersteinrichtung speichern, Gesprächsinhalte einordnen und den Kontext für ein bestimmtes Datum prüfen.</p>
+          </div>
+          <span class="rounded-full bg-sage px-3 py-1 text-sm">SQLite · pro Person getrennt</span>
+        </div>
+        <div class="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <label for="memory-user">Aktuelle Person
+            <select id="memory-user" disabled class="mt-1"><option value="">Speicher wird geprüft…</option></select>
+          </label>
+          <button id="memory-new" type="button" disabled class="bg-yellow">Neue Person</button>
+          <button id="memory-retry" type="button">Speicher prüfen</button>
+        </div>
+        <p id="memory-status" role="status" class="text-sm text-muted">Lokaler Speicher wird geprüft…</p>
+      </section>
+
+      <form id="memory-profile-form" class="card space-y-5" hidden>
+        <div>
+          <h3 id="memory-profile-heading" class="text-xl font-bold text-brown">1 · Ersteinrichtung</h3>
+          <p class="mt-1 text-sm text-muted">Nur bekannte und freigegebene Angaben eintragen. Leere Felder bleiben unbekannt.</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-3">
+          <label>Anzeigename *<input id="memory-display-name" required maxlength="80" autocomplete="off" class="mt-1"></label>
+          <label>Gewünschte Anrede<input id="memory-address" maxlength="80" value="du" class="mt-1" placeholder="z. B. du, Frau Berger, Maria"></label>
+          <label>Geburtsjahr <span class="font-normal text-muted">(optional)</span><input id="memory-birth-year" type="number" min="1900" class="mt-1" placeholder="z. B. 1942"></label>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <label>Wichtige Menschen und Beziehungen<textarea id="memory-people" maxlength="1000" rows="3" class="mt-1" placeholder="z. B. Tochter Anna, Enkel Paul"></textarea></label>
+          <label>Musikvorlieben<textarea id="memory-music" maxlength="1000" rows="3" class="mt-1" placeholder="z. B. Walzer, Udo Jürgens, früher im Chor"></textarea></label>
+          <label>Bedeutsame Orte und Lebensstationen<textarea id="memory-places" maxlength="1000" rows="3" class="mt-1" placeholder="z. B. aufgewachsen in Graz"></textarea></label>
+          <label>Nicht ungefragt ansprechen<textarea id="memory-sensitive" maxlength="1000" rows="3" class="mt-1" placeholder="Sensible Themen oder klare Grenzen"></textarea></label>
+        </div>
+        <div class="grid items-end gap-4 md:grid-cols-2">
+          <label>Bevorzugter Gesprächsstil
+            <select id="memory-style" class="mt-1">
+              <option>ruhig und zugewandt</option><option>kurz und direkt</option><option>ausführlich und erzählend</option>
+            </select>
+          </label>
+          <label class="check"><input id="memory-proactive" type="checkbox"> Bestätigte Erinnerungen dürfen passend von selbst angesprochen werden</label>
+        </div>
+        <button id="memory-profile-save" type="submit" class="bg-orange">Person anlegen</button>
+      </form>
+
+      <div id="memory-workspace" hidden class="space-y-6">
+        <div class="grid gap-6 xl:grid-cols-2">
+          <section class="card space-y-5" aria-labelledby="memory-photo-heading">
+            <div>
+              <h3 id="memory-photo-heading" class="text-xl font-bold text-brown">2 · Bilder zur Person <span class="font-serif font-normal">(0–n)</span></h3>
+              <p class="mt-1 text-sm text-muted">Bilder bleiben als Dateien gespeichert. Für die Suche werden nur bestätigte Beschreibungen und Daten verwendet; keine Gesichtserkennung und kein automatisches Raten.</p>
+            </div>
+            <label>Bilder auswählen<input id="memory-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple class="mt-1"></label>
+            <div id="memory-photo-staging" class="space-y-3"></div>
+            <button id="memory-photo-save" type="button" disabled>Bilder speichern</button>
+            <div id="memory-photos" class="grid gap-3 sm:grid-cols-2" aria-live="polite"></div>
+          </section>
+
+          <section class="card space-y-5" aria-labelledby="memory-add-heading">
+            <div>
+              <h3 id="memory-add-heading" class="text-xl font-bold text-brown">3 · Aussage aus dem Gespräch</h3>
+              <p class="mt-1 text-sm text-muted">Die Entscheidung wird hier bewusst bestätigt. „Nicht relevant“ wird nicht gespeichert.</p>
+            </div>
+            <div class="flex flex-wrap gap-2" role="group" aria-label="Fünf Beispiele">
+              <button type="button" data-memory-preset="hochzeit">Hochzeit</button><button type="button" data-memory-preset="lied">Lieblingslied</button>
+              <button type="button" data-memory-preset="kindheit">Kindheit</button><button type="button" data-memory-preset="idee">Liedidee</button>
+              <button type="button" data-memory-preset="einkauf">Einkauf</button>
+            </div>
+            <label>Bestätigte Kurzfassung *<textarea id="memory-summary" maxlength="1000" rows="3" placeholder="Was darf Tante Emma später genau wissen?" class="mt-1"></textarea></label>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label>Verwendung<select id="memory-scope" class="mt-1"><option value="persistent">Für spätere Gespräche merken</option><option value="conversation">Nur in diesem Gespräch</option><option value="irrelevant">Nicht relevant · verwerfen</option></select></label>
+              <label>Art<select id="memory-kind" class="mt-1"><option value="lebensereignis">Lebensereignis</option><option value="musikvorliebe">Musikvorliebe</option><option value="lebensgeschichte">Lebensgeschichte</option><option value="kreative_idee">Kreative Idee</option><option value="alltag">Alltag</option></select></label>
+              <label>Datum <span class="font-normal text-muted">(optional)</span><input id="memory-event-date" type="date" class="mt-1"></label>
+              <label>Wann ansprechen?<select id="memory-policy" class="mt-1"><option value="passend">Passend und behutsam</option><option value="nachfragen">Vorher nachfragen</option><option value="nur_auf_nachfrage">Nur auf Nachfrage</option></select></label>
+            </div>
+            <label class="check"><input id="memory-annual" type="checkbox"> Jedes Jahr rund um dieses Datum relevant</label>
+            <button id="memory-add" type="button" class="bg-orange">Entscheidung übernehmen</button>
+            <div id="memory-list" class="space-y-3" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <section class="card space-y-5" aria-labelledby="memory-context-heading">
+          <div>
+            <h3 id="memory-context-heading" class="text-xl font-bold text-brown">4 · Kontext für das nächste Gespräch prüfen</h3>
+            <p class="mt-1 text-sm text-muted">Strukturierte Daten und Jahrestage werden zuerst geprüft. Nur passende bestätigte Erinnerungen gelangen in den Modellkontext.</p>
+          </div>
+          <div class="grid items-end gap-4 md:grid-cols-[12rem_minmax(0,1fr)_auto]">
+            <label>Aktuelles Datum<input id="memory-current-date" type="date" class="mt-1"></label>
+            <label>Aktuelles Gesprächsthema<input id="memory-topic" maxlength="500" class="mt-1" placeholder="z. B. Familie, Hochzeit oder Musik"></label>
+            <div class="flex flex-wrap gap-2"><button id="memory-context-build" type="button" class="bg-yellow">Kontext zusammenstellen</button><button id="memory-new-conversation" type="button">Neues Testgespräch</button></div>
+          </div>
+          <div id="memory-context-results" hidden class="grid gap-4 lg:grid-cols-[minmax(16rem,.7fr)_minmax(0,1.3fr)]">
+            <div id="memory-context-matches" class="rounded-2xl bg-sage p-4"></div>
+            <div>
+              <p class="mb-2 font-semibold">Genau dieser Text würde an das Sprachmodell gehen</p>
+              <pre id="memory-context-output" class="max-h-[30rem] overflow-auto rounded-2xl bg-soft p-4 text-sm"></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="card space-y-5" aria-labelledby="memory-chat-heading">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 id="memory-chat-heading" class="text-xl font-bold text-brown">5 · Gespräch erzeugen und vorlesen</h3>
+              <p class="mt-1 text-sm text-muted">System-Prompt + deutscher Text + Stimmwirkung + passender Memory-Kontext → Ollama → Supertonic.</p>
+            </div>
+            <span class="rounded-full bg-sage px-3 py-1 text-sm">Sprache · Deutsch (de)</span>
+          </div>
+          <div class="grid gap-4 md:grid-cols-3">
+            <label>Ollama-Modell<select id="memory-chat-model" disabled class="mt-1"><option value="">Modelle werden geladen…</option></select></label>
+            <label>Supertonic-Stimme<select id="memory-chat-voice" class="mt-1"></select></label>
+            <label>Stimmwirkung<select id="memory-chat-tone" class="mt-1"></select></label>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 rounded-2xl bg-soft p-4">
+            <div class="min-w-0 flex-1 space-y-1">
+              <p id="memory-chat-tone-status" class="text-sm text-muted">Neutral · manuell gewählt. Eine Aufnahme wertet die Stimmwirkung automatisch aus.</p>
+              <p id="memory-chat-record-status" role="status" class="text-sm text-muted">Einmal aufnehmen: Das Audio wird lokal transkribiert und zugleich auf Stimmwirkung geprüft.</p>
+            </div>
+            <button id="memory-chat-record" type="button" aria-pressed="false">Aufnahme starten</button>
+          </div>
+          <label>Automatisches Transkript <span class="font-normal text-muted">· kann bei Bedarf korrigiert werden</span>
+            <textarea id="memory-chat-input" maxlength="1000" rows="3" class="mt-1" placeholder="z. B. Weißt du, was übermorgen für ein besonderer Tag ist?"></textarea>
+          </label>
+          <div class="flex flex-wrap items-center gap-3">
+            <button id="memory-chat-run" type="button" disabled class="bg-orange">Antwort erzeugen und vorlesen</button>
+            <button id="memory-chat-stop" type="button" disabled>Stoppen</button>
+            <p id="memory-chat-status" role="status" class="text-sm text-muted">Person und Ollama-Modell auswählen.</p>
+          </div>
+          <div id="memory-chat-log" class="space-y-3" aria-live="polite"></div>
+          <figure id="memory-chat-audio-result" hidden class="space-y-2 rounded-2xl bg-sage p-4">
+            <figcaption id="memory-chat-audio-caption" class="font-semibold text-brown"></figcaption>
+            <audio id="memory-chat-audio" controls preload="none" class="w-full" aria-label="Vorgelesene Antwort der Gedächtnis-Demo"></audio>
+          </figure>
+          <details id="memory-chat-request-panel" hidden>
+            <summary>Zuletzt an das Sprachmodell gesendet</summary>
+            <pre id="memory-chat-request" class="max-h-[30rem] overflow-auto rounded-2xl bg-soft p-4 text-xs"></pre>
+          </details>
+        </section>
+
+        <p class="text-sm text-muted">Lokale Entwicklungsdemo ohne Anmeldung. Für den produktiven Mehrpersonenbetrieb: App-Sandbox, Geräteschutz/Dateiverschlüsselung, Rollenrechte, Löschfunktion und Einwilligungsprotokoll ergänzen.</p>
+      </div>
+    </section>
+  </main>
+
+  <template id="variant-template">
+    <section class="card space-y-4">
+      <fieldset class="space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-xl font-bold text-brown" data-heading></h2>
+          <button type="button" data-run class="bg-orange disabled:bg-[#ece8e1] disabled:text-muted"></button>
+        </div>
+        <label class="block">Modell <select data-field="model" data-save class="mt-1"></select></label>
+        <div>
+          <p class="font-medium">An das Modell senden</p>
+          <div class="flex flex-wrap gap-x-4">
+            <label class="check"><input type="checkbox" data-field="use-system" data-save checked>System-Prompt</label>
+            <label class="check"><input type="checkbox" data-field="use-context" data-save checked>Gemeinsamer Kontext</label>
+            <label class="check"><input type="checkbox" data-field="use-prompt" data-save checked>Eingabe-Prompt</label>
+            <label class="check"><input type="checkbox" data-field="use-input" data-save checked>Eingabetext</label>
+          </div>
+        </div>
+        <label class="block">System-Prompt
+          <textarea data-field="system" data-save rows="9" maxlength="4000" lang="de" class="mt-1 text-sm leading-relaxed"></textarea>
+        </label>
+        <button type="button" data-reset>iPad-System-Prompt wiederherstellen</button>
+        <label class="block">Eingabe-Prompt <span class="font-normal text-muted">· optional, vor dem Eingabetext</span>
+          <textarea data-field="prompt" data-save rows="3" maxlength="4000" lang="de" placeholder="z. B. Antworte besonders kurz auf diese Aussage:" class="mt-1 text-sm"></textarea>
+        </label>
+      </fieldset>
+      <details>
+        <summary>Nächste Anfrage · genaues JSON</summary>
+        <pre data-preview class="max-h-96 overflow-auto rounded-xl bg-soft p-4 text-xs"></pre>
+      </details>
+      <div class="border-t border-line pt-4">
+        <h3 class="font-semibold">Letzte Antwort</h3>
+        <p data-status role="status" class="mt-2 text-sm text-muted">Bereit.</p>
+        <div data-response class="mt-3 min-h-24 whitespace-pre-wrap break-words text-lg leading-relaxed"></div>
+        <details data-thinking-panel hidden>
+          <summary>Modellüberlegungen</summary>
+          <pre data-thinking class="text-sm text-muted"></pre>
+        </details>
+        <details data-sent-panel hidden>
+          <summary>Zuletzt gesendete Anfrage · genaues JSON</summary>
+          <pre data-sent class="max-h-96 overflow-auto rounded-xl bg-soft p-4 text-xs"></pre>
+        </details>
+      </div>
+    </section>
+  </template>
+</body>
+</html>

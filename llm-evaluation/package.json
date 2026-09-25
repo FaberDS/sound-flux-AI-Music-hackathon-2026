@@ -1,0 +1,28 @@
+{
+  "name": "tonumo-llm-evaluation",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "start": "env -u VIRTUAL_ENV uv run python server.py",
+    "start:lan": "env -u VIRTUAL_ENV uv run python server.py --host 0.0.0.0",
+    "promptfoo": "PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 PROMPTFOO_CONFIG_DIR=.promptfoo OLLAMA_BASE_URL=http://127.0.0.1:11434 REQUEST_TIMEOUT_MS=120000 promptfoo",
+    "check": "node check.mjs && npm run promptfoo -- validate config --config promptfooconfig.mjs",
+    "eval": "npm run promptfoo -- eval --config promptfooconfig.mjs --no-cache --max-concurrency 1",
+    "eval:hybrid": "node hybrid.mjs && node run-hybrid.mjs",
+    "view": "npm run promptfoo -- view --port 15500 --no",
+    "test:motion": "node test-motion.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "promptfoo": "0.123.1"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
+    "@wllama/wllama": "^3.2.3",
+    "@wllama/wllama-compat": "^3.2.3",
+    "exifr": "7.1.3"
+  }
+}
