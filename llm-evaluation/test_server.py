@@ -95,6 +95,13 @@ class ServerTest(unittest.TestCase):
                     patch("server.subprocess.Popen") as spawn:
                 process = spawn.return_value
                 process.poll.return_value = None
+                existing = PromptfooViewer(health.server_port)
+                existing.start()
+                spawn.assert_not_called()
+                self.assertTrue(existing.status()["ready"])
+                existing.close()
+                process.terminate.assert_not_called()
+                HealthHandler.payload = []
                 viewer.start()
                 command = spawn.call_args.args[0]
                 self.assertEqual(command, ["/test/node", str(ROOT / "node_modules/promptfoo/dist/src/entrypoint.js"),
@@ -105,7 +112,11 @@ class ServerTest(unittest.TestCase):
                 self.assertEqual(options["env"]["PROMPTFOO_CONFIG_DIR"], str(ROOT / ".promptfoo"))
                 self.assertEqual(options["env"]["PROMPTFOO_DISABLE_TELEMETRY"], "1")
                 self.assertEqual(options["env"]["PROMPTFOO_DISABLE_UPDATE"], "1")
+                HealthHandler.payload = {"status": "OK", "version": "0.123.1"}
                 self.assertTrue(viewer.status()["ready"])
+                process.poll.return_value = process.returncode = 1
+                self.assertEqual(viewer.status(), {"port": health.server_port, "ready": True, "error": None})
+                process.poll.return_value = None
                 HealthHandler.payload = []
                 self.assertFalse(viewer.status()["ready"])
                 with patch("server.HTTPConnection.request", side_effect=ConnectionRefusedError):
@@ -119,7 +130,7 @@ class ServerTest(unittest.TestCase):
                 viewer.close()
                 process.terminate.assert_called_once()
                 process.kill.assert_called_once()
-            missing = PromptfooViewer(15500)
+            missing = PromptfooViewer(health.server_port)
             with patch("server.shutil.which", return_value=None):
                 missing.start()
             self.assertFalse(missing.status()["ready"])

@@ -70,6 +70,7 @@ FRONTEND_PORT=5174 ./start.sh
 frontend/      Current React application
 backend-mockup/ Lightweight speech and music APIs for frontend development
 local-speech/  Local transcription, conversation, and text-to-speech
+ipad-audio-agent/ Native German voice companion for iPad Air M4
 audio-engine/  Local humming-to-music generation
 denis-v1/      Draft 1: camera and head-gesture instrument
 denis-v2/      Draft 2: memory-focused music session
@@ -80,3 +81,9 @@ start-dev.sh   Frontend and mock launcher, without model loading
 
 For development commands, API details, and tests, see the README in each
 component directory.
+
+The [iPad audio agent](ipad-audio-agent/README.md) is a separate native SwiftUI app
+with German on-device speech and conversation. Open its Xcode project to build
+for compatible iPads and iPhones, including the target iPad Air M4. The initial
+implementation compiles; physical-device voice and
+offline validation are still pending.

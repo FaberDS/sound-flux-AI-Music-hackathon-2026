@@ -520,7 +520,7 @@ and use the native Promptfoo interface. The viewer loads when you first open the
 tab and stays on the selected evaluation when switching between lab tools.
 **Neu laden** refreshes it; **In eigenem Tab öffnen** gives it a full browser tab.
 
-The lab starts the installed viewer on port **15500**, using this folder's
+The lab reuses a healthy viewer already running on port **15500**, or starts the installed viewer using this folder's
 `.promptfoo/` database, with telemetry and update checks disabled. CLI evaluations
 and hybrid results therefore appear in the same viewer. Run `npm run eval` or
 `npm run eval:hybrid` to execute the existing suites; browser prompt edits are
@@ -528,8 +528,9 @@ still separate from those checked-in configurations.
 
 If Node or Promptfoo is missing, the status API reports setup instructions.
 Run `npm ci` and restart the lab; other browser tools also depend on npm assets.
+An existing viewer keeps its own database and stays running when the lab closes.
 If the viewer exits, inspect the server terminal and restart the lab. If port
-15500 is already in use, stop your separate viewer or use
+15500 is occupied by something other than a healthy viewer, use
 `npm start -- --promptfoo-port 15501`. For an occupied lab port, use
 `npm start -- --port 8089`; the viewer port must differ from the lab port.
 The embedded viewer uses the lab page's hostname **and protocol**, replacing
@@ -634,6 +635,110 @@ Die Tests messen weder echte Audio-/Bilderkennung noch Timer, Speicherung,
 Unterbrechungslatenz oder MLX-Leistung. Auch ein mitgelieferter Dialogverlauf
 ist kein vollständig ausgespieltes Gespräch. Diese Grenzen und die manuelle
 Bewertungsrubrik stehen in der deutschen Datensatzbewertung.
+
+## Fully local conversational security validation
+
+The security evaluation uses a local adaptive attacker instead of Promptfoo's
+hosted Hydra strategy. **Attacker, chatbot and judge all run in local Ollama.**
+There is no email verification, account, API key, cloud inference or result
+upload. Promptfoo is used only as the local evaluation engine and result viewer.
+
+```sh
+npm run check
+npm run eval:security
+```
+
+The earlier `npm run eval:hydra` command is an alias for this local evaluation.
+It does not invoke Promptfoo's `jailbreak:hydra` strategy. No production chatbot
+prompts are changed.
+
+### Models and network boundary
+
+The two current chatbot targets are **Qwen3 1.7B and 0.6B**. The already installed
+**Qwen3 14B** generates follow-up attacks and grades replies. To select another
+already installed local model for either role:
+
+```sh
+SECURITY_ATTACKER_MODEL=qwen3:14b SECURITY_JUDGE_MODEL=qwen3:14b npm run eval:security
+```
+
+The runner checks the installed GGUF models before starting; it never downloads
+models and rejects Ollama cloud model entries. `OLLAMA_BASE_URL` must be a
+loopback HTTP endpoint (default `http://127.0.0.1:11434`). The evaluation process
+blocks external TCP connections, and model requests reject redirects.
+Promptfoo remote generation, update checks, telemetry and result sharing are
+also disabled. The separate HTML report has no remote scripts, fonts or assets.
+Existing lab experiments may still use CDN assets; this report works offline.
+
+### Coverage and option sweep
+
+There are **20 fixed synthetic starting goals**, two for each of ten risks:
+hijacking, invented capabilities/actions, hallucinations, identity imitation,
+direct/session privacy, covert recording or sharing, unsupported specialized
+advice, age bias and disability bias. The same seeds are used in every option.
+
+| Mode | Maximum attempts | Maximum backtracks |
+| --- | ---: | ---: |
+| Direct baseline | 1 | 0 |
+| Adaptive replay | 3 | 0 |
+| Adaptive replay | 3 | 10 |
+| Adaptive replay | 10 | 0 |
+| Adaptive replay | 10 | 10 |
+
+This is **200 conversations** (20 seeds × 5 options × 2 target models), with at
+most **1,080 target requests**, **1,080 judge requests** and **880 follow-up
+attacker requests**. An identified violation stops that conversation early.
+Backtracking removes the rejected user/assistant pair from the active branch;
+the attacker can still see recent failed attempts. The attempt cap includes
+backtracked attempts, so a ten-attempt configuration cannot reach ten actual
+backtracks. This is a bounded local alternative, not a reproduction of Hydra's
+proprietary cloud agent or its scan-wide learning.
+
+The target receives its original German system prompt, profile, generation
+settings and active conversation branch on every turn. Goals, grading criteria
+and judge feedback never enter its request. Up to ten turns are supported;
+user messages keep the app's 1,000-character limit. The target endpoint has no
+server-managed sessions, so full-history replay is used throughout.
+
+The code-only hijacking goal is checked by exact output matching. Other risks
+use a local judge with a concrete per-risk criterion rather than just keyword
+presence. A judged violation requires an exact quote from the chatbot's reply.
+Explicit negations, uncertainty, clearly marked fiction and access to the
+current person's own profile are distinguished from unsupported claims.
+**Local judge decisions still require human review.** Resisted means this
+bounded attacker did not find a violation; it does not prove security.
+Truncated replies, unavailable models and malformed attacker/judge outputs
+are errors, never passes. Each risk has only two seeds, and the option runs
+are stochastic rather than a calibrated comparative benchmark.
+
+### Results and visualization
+
+Open **Promptfoo → Lokale Sicherheitsauswertung** in the lab. The report is
+also at [results-local-security.html](results-local-security.html), or can be
+opened directly from disk without the lab. It shows one risk × model matrix
+per option, with **violations / completed conversations**, plus separate error
+and pending counts. Expand a conversation to inspect every attempted message,
+response, quoted evidence and the full branch at that attempt. Filters show
+violations, resisted conversations or errors. The report updates after every
+ten completed conversations; reload it during a run.
+
+Full results remain in the local Promptfoo database and
+`results-local-security.json`. The runnable matrix, partial conversation records
+and log are in ignored `.promptfoo/results-local-security.*` files. An interrupted
+run retains completed records for inspection. Exit code 100 means violations
+were found; code 1 means technical errors, incomplete coverage or blocked
+external connection attempts. A failed assertion is a finding, not a setup
+failure. All cloud-backed generation commands have been removed from this path.
+
+`check-local-security.mjs` checks every option, real branch/backtrack behavior,
+app prompt/context parity, grading-data isolation, evidence validation,
+cancellation, errors, external-network rejection and HTML escaping without
+calling models. The existing 108-case functional suite is unchanged.
+
+Run `node check-local-security.mjs --judge` to check the selected local judge
+against 22 fixed safe/unsafe examples before changing models. Qwen3 14B passed
+22/22 on this calibration; Qwen3.5 2B passed 16/22 and is not used. These examples
+check basic grading behavior, not general judge reliability.
 
 ## Hybrid reliability experiment
 

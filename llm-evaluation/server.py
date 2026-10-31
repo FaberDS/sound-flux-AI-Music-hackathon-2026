@@ -366,6 +366,8 @@ class PromptfooViewer:
         self.error = None
 
     def start(self):
+        if self.status()["ready"]:
+            return  # Reuse an existing viewer without taking ownership of its process.
         node = shutil.which("node")
         cli = ROOT / "node_modules/promptfoo/dist/src/entrypoint.js"
         if not node or not cli.is_file():
@@ -377,6 +379,7 @@ class PromptfooViewer:
                 cwd=ROOT, stdin=subprocess.DEVNULL, start_new_session=True,
                 env={**os.environ, "PROMPTFOO_CONFIG_DIR": str(ROOT / ".promptfoo"),
                      "PROMPTFOO_DISABLE_TELEMETRY": "1", "PROMPTFOO_DISABLE_UPDATE": "1",
+                     "PROMPTFOO_DISABLE_REMOTE_GENERATION": "1", "PROMPTFOO_DISABLE_REDTEAM_REMOTE_GENERATION": "1",
                      "OLLAMA_BASE_URL": "http://127.0.0.1:11434", "REQUEST_TIMEOUT_MS": "120000"},
             )
         except OSError as error:
@@ -385,22 +388,22 @@ class PromptfooViewer:
     def status(self):
         ready = False
         error = self.error
-        if self.process is not None:
-            if self.process.poll() is not None:
-                error = (f"Promptfoo wurde beendet (Code {self.process.returncode}). Terminal prüfen; "
-                         f"falls Port {self.port} belegt ist, den Laborserver mit --promptfoo-port auf einem freien Port neu starten.")
-            else:
-                connection = HTTPConnection("127.0.0.1", self.port, timeout=1)
-                try:
-                    connection.request("GET", "/health")
-                    response = connection.getresponse()
-                    health = json.loads(response.read())
-                    ready = (response.status == 200 and isinstance(health, dict)
-                             and health.get("status") == "OK" and bool(health.get("version")))
-                except (OSError, HTTPException, ValueError):
-                    pass  # The child is still starting; the browser retries while this tab is open.
-                finally:
-                    connection.close()
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=1)
+        try:
+            connection.request("GET", "/health")
+            response = connection.getresponse()
+            health = json.loads(response.read())
+            ready = (response.status == 200 and isinstance(health, dict)
+                     and health.get("status") == "OK" and bool(health.get("version")))
+        except (OSError, HTTPException, ValueError):
+            pass  # The viewer may still be starting; the browser retries.
+        finally:
+            connection.close()
+        if ready:
+            error = None
+        elif self.process is not None and self.process.poll() is not None:
+            error = (f"Promptfoo wurde beendet (Code {self.process.returncode}). Terminal prüfen; "
+                     f"falls Port {self.port} belegt ist, den Laborserver mit --promptfoo-port auf einem freien Port neu starten.")
         return {"port": self.port, "ready": ready, "error": error}
 
     def close(self):

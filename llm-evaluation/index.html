@@ -376,10 +376,12 @@
           <div class="flex flex-wrap items-center gap-4">
             <button id="promptfoo-refresh" type="button">Neu laden</button>
             <a id="promptfoo-open" target="_blank" rel="noopener noreferrer" hidden class="font-semibold text-brown underline underline-offset-4">In eigenem Tab öffnen ↗</a>
+            <a id="local-security-report" href="/results-local-security.html" target="_blank" rel="noopener noreferrer" class="font-semibold text-brown underline underline-offset-4">Lokale Sicherheitsauswertung ↗</a>
           </div>
         </div>
         <p id="promptfoo-status" role="status" class="text-sm text-muted">Promptfoo wird beim Öffnen dieses Tabs geladen.</p>
-        <p class="text-sm text-muted">Neue Läufe: <code>npm run eval</code> oder <code>npm run eval:hybrid</code>. Änderungen aus „Prompts vergleichen“ werden nicht automatisch übernommen.</p>
+        <p class="text-sm text-muted">Lokale Sicherheitstests prüfen adaptive Angriffe über mehrere Gesprächsrunden. Angreifer, Chatbot und Prüfer laufen in Ollama auf diesem Rechner, ohne Registrierung oder Cloud. Die Auswertung zeigt Risiken pro Modell und Option, technische Fehler getrennt sowie vollständige Gesprächsverläufe. Sie ersetzt die Cloud-Strategie Hydra; ein automatischer Pass belegt keine allgemeine Gesprächsqualität.</p>
+        <p class="text-sm text-muted">Neue Läufe: <code>npm run eval</code>, <code>npm run eval:hybrid</code> oder <code>npm run eval:security</code>. Die Sicherheitsauswertung ist nach dem Start des lokalen Laufs verfügbar. Änderungen aus „Prompts vergleichen“ werden nicht automatisch übernommen.</p>
       </div>
       <iframe id="promptfoo-frame" title="Promptfoo – lokale Evaluationsläufe und Ergebnisse" allow="clipboard-write" hidden class="w-full rounded-3xl border border-line bg-white" style="height: 78vh; min-height: 600px;"></iframe>
     </section>

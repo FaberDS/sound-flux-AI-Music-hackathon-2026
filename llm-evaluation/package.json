@@ -8,10 +8,12 @@
   "scripts": {
     "start": "env -u VIRTUAL_ENV uv run python server.py",
     "start:lan": "env -u VIRTUAL_ENV uv run python server.py --host 0.0.0.0",
-    "promptfoo": "PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 PROMPTFOO_CONFIG_DIR=.promptfoo OLLAMA_BASE_URL=http://127.0.0.1:11434 REQUEST_TIMEOUT_MS=120000 promptfoo",
-    "check": "node check.mjs && npm run promptfoo -- validate config --config promptfooconfig.mjs",
+    "promptfoo": "PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 PROMPTFOO_DISABLE_REMOTE_GENERATION=1 PROMPTFOO_DISABLE_REDTEAM_REMOTE_GENERATION=1 PROMPTFOO_CONFIG_DIR=.promptfoo OLLAMA_BASE_URL=http://127.0.0.1:11434 REQUEST_TIMEOUT_MS=120000 promptfoo",
+    "check": "node check.mjs && node check-local-security.mjs && npm run promptfoo -- validate config --config promptfooconfig.mjs local-security.config.mjs",
     "eval": "npm run promptfoo -- eval --config promptfooconfig.mjs --no-cache --max-concurrency 1",
     "eval:hybrid": "node hybrid.mjs && node run-hybrid.mjs",
+    "eval:security": "node run-local-security.mjs",
+    "eval:hydra": "npm run eval:security",
     "view": "npm run promptfoo -- view --port 15500 --no",
     "test:motion": "node test-motion.mjs"
   },
